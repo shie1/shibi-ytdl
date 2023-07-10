@@ -79,6 +79,7 @@ const Home: NextPage = () => {
       display: 'flex',
       flexDirection: 'column',
       flexGrow: 1,
+      width: '100%',
       position: 'relative',
     }}>
       <AnimatePresence>
@@ -130,9 +131,11 @@ const Home: NextPage = () => {
             </motion.div>
           </>}
         </AnimatePresence>
-        <Input.Search loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
-          setQuery(e.target.value)
-        }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
+        <motion.div animate={{ width: '100%' }} layout>
+          <Input.Search loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
+            setQuery(e.target.value)
+          }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
+        </motion.div>
         <Modal
           title="Download video"
           open={modalOpen}
