@@ -1,10 +1,23 @@
 import type { NextPage } from "next"
 import { Input, Typography, Modal, Select, Space, Switch } from "antd"
 import { motion, AnimatePresence } from "framer-motion"
-import { useEffect, useRef, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import { getVideoIDFromURL } from "@/components/strings"
-import { apiCall } from "@/components/api"
+import { apiCall, download } from "@/components/api"
 import Image from "next/image"
+
+const PIPED = "https://api-piped.mha.fi"
+
+const containers = [
+  {
+    value: "mp4",
+    type: "video"
+  },
+  {
+    value: "mp3",
+    type: "audio"
+  },
+]
 
 const Home: NextPage = () => {
   const [video, setVideo] = useState<any>(undefined)
@@ -12,12 +25,14 @@ const Home: NextPage = () => {
   const [bg, setBg] = useState<any>(undefined)
   const [query, setQuery] = useState<string>("")
   const [modalOpen, setModalOpen] = useState<boolean>(false)
-  const [videoStream, setVideoStream] = useState<string>("")
+  const [videoStream, setVideoStream] = useState<string | undefined>()
+  const [audioStream, setAudioStream] = useState<string | undefined>()
+  const [container, setContainer] = useState<string>("mp4")
   const ready = video && bg
 
   const videoStreams = !video ? [] : [{
     label: 'No Video',
-    value: ""
+    value: "off"
   }, ...video.videoStreams.filter((stream: any) =>
     stream.mimeType.startsWith("video") && !stream.quality.startsWith("LBRY")
   ).map((stream: any) => {
@@ -41,7 +56,7 @@ const Home: NextPage = () => {
 
   const audioStreams = !video ? [] : [{
     label: 'No Audio',
-    value: ""
+    value: "off"
   }, ...video.audioStreams.filter((stream: any) =>
     stream.mimeType.startsWith("audio")
   ).map((stream: any) => {
@@ -49,10 +64,39 @@ const Home: NextPage = () => {
       label: `${stream.quality} (${stream.mimeType})`,
       value: stream.url
     }
+  }).sort((a: any, b: any) => {
+    const aq = a.label.split(' ')[0]
+    const bq = b.label.split(' ')[0]
+    return parseInt(bq) - parseInt(aq)
   })]
 
+  // if only video, then video containers, if only audio, then audio containers, if both, then video containers, if none, then none
+  // ignore videostreams and audiostreams, just use the container
+  const availableContainers = !video ? [] : containers.filter((c) => {
+    if (audioStream === "off" && videoStream === "off") {
+      return false
+    } else if (audioStream !== "off" && videoStream !== "off") {
+      if (c.type === "video") {
+        return true
+      }
+    } else {
+      if (c.type === "video" && videoStream !== "off") {
+        return true
+      }
+      if (c.type === "audio" && audioStream !== "off") {
+        return true
+      }
+    }
+    return false
+  }).map((c) => c.value)
+
   useEffect(() => {
-    setVideoID(undefined); setVideo(undefined); setBg(undefined)
+    if (availableContainers.find((c) => c === container)) return
+    setContainer(availableContainers[0])
+  }, [availableContainers])
+
+  useEffect(() => {
+    setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer("mp4")
     const id = getVideoIDFromURL(query)
     if (!query || !id) { return }
     setVideoID(id)
@@ -60,7 +104,7 @@ const Home: NextPage = () => {
 
   useEffect(() => {
     if (!videoID) return
-    apiCall("GET", `https://pipedapi.kavin.rocks/streams/${videoID}`).then((res) => {
+    apiCall("GET", `${PIPED}/streams/${videoID}`).then((res) => {
       setVideo(res)
     })
   }, [videoID])
@@ -125,8 +169,8 @@ const Home: NextPage = () => {
               exit={{ height: 0 }}
               style={{ overflow: 'hidden', marginBottom: '0.5rem' }}
             >
-              <Image alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '20dvh', width: 'auto', marginBottom: '.5rem', borderRadius: 5 }} />
-              <Typography.Title style={{ fontSize: '2rem', margin: 0 }} className="center horizontal vertical">{video.title}</Typography.Title>
+              <Image draggable={false} alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '26dvh', width: 'auto', marginBottom: '.5rem', borderRadius: 10 }} />
+              <Typography.Title style={{ fontSize: '1.8rem', textOverflow: 'ellipsis', overflow: 'hidden', width: '100%', margin: 0, lineClamp: 2, WebkitLineClamp: 2, display: "-webkit-box", WebkitBoxOrient: 'vertical' }} className="center horizontal vertical">{video.title}</Typography.Title>
               <Typography.Text style={{ fontSize: '1rem' }} className="center horizontal vertical">{video.uploader}</Typography.Text>
             </motion.div>
           </>}
@@ -140,7 +184,30 @@ const Home: NextPage = () => {
           title="Download video"
           open={modalOpen}
           onCancel={() => setModalOpen(false)}
-          onOk={() => setModalOpen(false)}
+          onOk={() => {
+            console.count("download")
+            download("/api/download", {
+              videoStream: videoStream === "off" ? undefined : videoStream || videoStreams[1].value,
+              audioStream: audioStream === "off" ? undefined : audioStream || audioStreams[1].value,
+              container,
+            }).then((url) => {
+              const link = document.createElement('a');
+              link.href = url;
+              link.setAttribute(
+                'download',
+                `${video.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '')}.${container}`,
+              );
+              // Append to html link element page
+              document.body.appendChild(link);
+
+              // Start download
+              link.click();
+
+              // Clean up and remove the link
+              link.remove();
+            })
+            setModalOpen(false)
+          }}
         >
           {video && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '.5rem' }}>
             {/* height should be relative to thumb width to make it 16x9 */}
@@ -154,8 +221,12 @@ const Home: NextPage = () => {
               backgroundImage: `url("${bg}")`,
               backgroundPosition: 'center',
               backgroundSize: 'cover',
+              borderRadius: '10px',
             }}>
-              <div style={{ background: 'rgba(0,0,0,.7)', padding: '.2rem', display: 'flex', flexDirection: 'column', width: '100%' }}>
+              <div style={{
+                borderRadius: '0 0 10px 10px',
+                background: 'rgba(0,0,0,.7)', padding: '.2rem', display: 'flex', flexDirection: 'column', width: '100%'
+              }}>
                 <Typography.Text style={{ fontSize: '1rem', lineClamp: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', WebkitLineClamp: 1, width: '100%' }}>
                   {video.title}
                 </Typography.Text>
@@ -176,12 +247,18 @@ const Home: NextPage = () => {
             }}>
               <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Video</Typography.Text>
-                <Select options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={videoStreams[1].value} />
+                <Select value={videoStream} options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={videoStreams[1].value} />
               </div>
               <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Audio</Typography.Text>
-                <Select options={audioStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={audioStreams[1].value} />
+                <Select value={audioStream} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} defaultValue={audioStreams[1].value} />
               </div>
+              <Select value={container} options={availableContainers.map((container) => {
+                return {
+                  label: container,
+                  value: container
+                }
+              })} style={{ flex: 1, minWidth: 179 }} onChange={setContainer} defaultValue={availableContainers[0]} />
             </div>
           </div>}
         </Modal>
