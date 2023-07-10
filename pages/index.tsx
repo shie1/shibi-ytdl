@@ -9,10 +9,11 @@ import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { IconCheck, IconDeviceMobileOff, IconMovie, IconX } from "@tabler/icons-react"
 import Head from "next/head"
+import axios, { AxiosResponse, CancelTokenSource, Canceler } from "axios";
 
 const PIPED = "https://api-piped.mha.fi"
 
-const videoDisallowedITags: Array<number> = [313, 271]
+const videoDisallowedITags: Array<number> = []
 const audioDisallowedITags: Array<number> = []
 
 const containers = [
@@ -55,8 +56,7 @@ const weightedPercentage = (a: { weight: number, value: number }, b: { weight: n
   return averagePercentage;
 }
 
-
-const blobToArrayBuffer = (blob: Blob): Promise<string | Uint8Array> => {
+const blobToArrayBuffer = (blob: Blob): Promise<Uint8Array> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -68,26 +68,34 @@ const blobToArrayBuffer = (blob: Blob): Promise<string | Uint8Array> => {
   });
 };
 
-const fetchWithProgress = async (url: string, progressCallback?: (progress: number) => void): Promise<string | Uint8Array> => {
-  const response = await fetch(url);
-  const totalBytes: number = parseInt(response.headers.get('content-length') as string);
-  const reader = response.body!.getReader();
-  let receivedBytes = 0;
-  const chunks: Uint8Array[] = [];
+const fetchWithProgress = async (url: string, params?: { timeout?: number, timeoutCallback?: () => void, progressCallback?: (progress: number) => void }): Promise<Uint8Array | undefined> => {
+  const source = axios.CancelToken.source();
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    receivedBytes += value.length;
-    const currentProgress = Math.floor((receivedBytes / totalBytes) * 100);
-    if (progressCallback) progressCallback(currentProgress);
-    chunks.push(value);
+  try {
+    const response: AxiosResponse = await axios.get(url, {
+      responseType: "blob",
+      cancelToken: source.token,
+      onDownloadProgress: (progressEvent) => {
+        const currentProgress = Math.floor((progressEvent.loaded / progressEvent.total!) * 100);
+        if (params?.progressCallback) params.progressCallback(currentProgress);
+      },
+    });
+
+    const blob = response.data;
+    const result = await blobToArrayBuffer(blob);
+
+    return result;
+  } catch (error) {
+    if (axios.isCancel(error)) {
+      // Request was canceled
+      console.log("Request canceled", error);
+    } else {
+      // Other error occurred
+      console.log("Error occurred", error);
+    }
+
+    return
   }
-
-  const blob = new Blob(chunks);
-  const result = await blobToArrayBuffer(blob);
-
-  return result;
 };
 
 const Home: NextPage = () => {
@@ -346,28 +354,57 @@ const Home: NextPage = () => {
               className: 'noclose',
               icon: <Spin />,
             })
-            const vStreamUrl = videoStream === "off" ? undefined : videoStream || video.videoStreams[1].url
-            const aStreamUrl = audioStream === "off" ? undefined : audioStream || video.audioStreams[1].url
+            const vStreamUrl = videoStream === "off" ? undefined : videoStream || videoStreams[1].value
+            const aStreamUrl = audioStream === "off" ? undefined : audioStream || audioStreams[1].value
+            console.log(`Started #${conversionId}`, { vStreamUrl, aStreamUrl, container })
+            let vStreamFile
+            let aStreamFile
 
             if (vStreamUrl) {
-              const vStreamFile = await fetchWithProgress(vStreamUrl, (progress) => {
-                setDlProgress((prev) => {
-                  if (!prev) return { video: progress, audio: 0 }
-                  return { ...prev, video: progress }
-                })
+              vStreamFile = await fetchWithProgress(vStreamUrl, {
+                progressCallback: (progress) => {
+                  setDlProgress((prev) => {
+                    if (!prev) return { video: progress, audio: 0 }
+                    return { ...prev, video: progress }
+                  })
+                },
+                timeoutCallback: () => {
+                  notifications.error({
+                    message: 'Download timed out!',
+                    description: 'Please check your network connection',
+                    placement: 'bottomRight',
+                    key: 'download',
+                    icon: <IconX />,
+                    duration: 4.5,
+                  })
+                }
               });
-              ffmpeg.FS("writeFile", `video-${conversionId}`, vStreamFile)
+              if (vStreamFile) ffmpeg.FS("writeFile", `video-${conversionId}`, vStreamFile)
             }
 
             if (aStreamUrl) {
-              const aStreamFile = await fetchWithProgress(aStreamUrl, (progress) => {
-                setDlProgress((prev) => {
-                  if (!prev) return { video: 0, audio: progress }
-                  return { ...prev, audio: progress }
-                })
+              aStreamFile = await fetchWithProgress(aStreamUrl, {
+                progressCallback: (progress) => {
+                  setDlProgress((prev) => {
+                    if (!prev) return { video: 0, audio: progress }
+                    return { ...prev, audio: progress }
+                  })
+                },
+                timeoutCallback: () => {
+                  notifications.error({
+                    message: 'Download timed out!',
+                    description: 'Please check your network connection',
+                    placement: 'bottomRight',
+                    key: 'download',
+                    icon: <IconX />,
+                    duration: 4.5,
+                  })
+                }
               });
-              ffmpeg.FS("writeFile", `audio-${conversionId}`, aStreamFile)
+              if (aStreamFile) ffmpeg.FS("writeFile", `audio-${conversionId}`, aStreamFile)
             }
+
+            if ((vStreamUrl && !vStreamFile) || (aStreamUrl && !aStreamFile)) { setInProgress(false); return } // if timeout return
 
             const videoS = !vStreamUrl ? '' : ` -i video-${conversionId}`
             const audioS = !aStreamUrl ? '' : ` -i audio-${conversionId}`
@@ -496,7 +533,7 @@ const Home: NextPage = () => {
 }
 
 export async function getServerSideProps(context: any) {
-  // set HTTP header
+  context.res.setHeader('Cache-Control', 'no-store');
   context.res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   context.res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
   return {
