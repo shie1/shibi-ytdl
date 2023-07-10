@@ -13,8 +13,3 @@ export const apiCall = async (method: "GET" | "POST", url: string, body?: any) =
             return (await axios.post(url, body)).data as any
     }
 }
-
-export const download = async (url: string, body?: any) => {
-    const res = await axios.post(url, body, { responseType: 'blob' })
-    return URL.createObjectURL(res.data)
-}
