@@ -125,11 +125,6 @@ const Home: NextPage = () => {
   }).map((c) => c.value)
 
   useEffect(() => {
-    if (availableContainers.find((c) => c === container)) return
-    setContainer(availableContainers[0])
-  }, [availableContainers])
-
-  useEffect(() => {
     setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer("mp4")
     const id = getVideoIDFromURL(query)
     if (!query || !id) { return }
