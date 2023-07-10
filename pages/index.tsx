@@ -1,10 +1,11 @@
 import type { NextPage } from "next"
-import { Input, Typography, Modal, Select, Space, Switch } from "antd"
+import { Input, Typography, Modal, Select, Space, Spin, notification } from "antd"
 import { motion, AnimatePresence } from "framer-motion"
 import { use, useEffect, useRef, useState } from "react"
 import { getVideoIDFromURL } from "@/components/strings"
 import { apiCall, download } from "@/components/api"
 import Image from "next/image"
+import { IconCheck } from "@tabler/icons-react"
 
 const PIPED = "https://api-piped.mha.fi"
 
@@ -28,6 +29,9 @@ const Home: NextPage = () => {
   const [videoStream, setVideoStream] = useState<string | undefined>()
   const [audioStream, setAudioStream] = useState<string | undefined>()
   const [container, setContainer] = useState<string>("mp4")
+  const [notifications, contextHolder] = notification.useNotification();
+  const [inProgress, setInProgress] = useState<boolean>(false)
+
   const ready = video && bg
 
   const videoStreams = !video ? [] : [{
@@ -119,6 +123,7 @@ const Home: NextPage = () => {
   }, [video])
 
   return (<>
+    {contextHolder}
     <motion.div id="inner" style={{
       display: 'flex',
       flexDirection: 'column',
@@ -176,7 +181,7 @@ const Home: NextPage = () => {
           </>}
         </AnimatePresence>
         <motion.div animate={{ width: '100%' }} layout>
-          <Input.Search loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
+          <Input.Search disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
             setQuery(e.target.value)
           }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
         </motion.div>
@@ -185,12 +190,30 @@ const Home: NextPage = () => {
           open={modalOpen}
           onCancel={() => setModalOpen(false)}
           onOk={() => {
-            console.count("download")
+            setInProgress(true)
+            notifications.open({
+              message: 'Converting video...',
+              description: 'Your video is being converted. This may take a while.',
+              duration: 0,
+              placement: 'bottomRight',
+              key: 'download',
+              closeIcon: <></>,
+              icon: <Spin />,
+            })
             download("/api/download", {
               videoStream: videoStream === "off" ? undefined : videoStream || videoStreams[1].value,
               audioStream: audioStream === "off" ? undefined : audioStream || audioStreams[1].value,
               container,
             }).then((url) => {
+              setInProgress(false)
+              notifications.success({
+                message: 'Conversion complete!',
+                description: 'Your video has been converted. The download should start shortly.',
+                placement: 'bottomRight',
+                key: 'download',
+                duration: 4.5,
+                icon: <IconCheck />
+              })
               const link = document.createElement('a');
               link.href = url;
               link.setAttribute(
