@@ -1,16 +1,19 @@
 import type { NextPage } from "next"
 import { Input, Typography, Modal, Select, Spin, notification } from "antd";
 import { motion, AnimatePresence } from "framer-motion"
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getVideoIDFromURL } from "@/components/strings"
 import { apiCall, getHost } from "@/components/api"
 import Image from "next/image"
 import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
-import { IconCheck, IconMovie } from "@tabler/icons-react"
+import { IconCheck, IconDeviceMobileOff, IconMovie, IconX } from "@tabler/icons-react"
 import Head from "next/head"
 
 const PIPED = "https://api-piped.mha.fi"
+
+const videoDisallowedITags: Array<number> = [313, 271]
+const audioDisallowedITags: Array<number> = []
 
 const containers = [
   {
@@ -39,6 +42,54 @@ const containers = [
   }
 ]
 
+const weightedPercentage = (a: { weight: number, value: number }, b: { weight: number, value: number }) => {
+  // Ensure the input percentages are between 0 and 100
+  a.value = Math.min(Math.max(a.value, 0), 100);
+  b.value = Math.min(Math.max(b.value, 0), 100);
+
+  // Calculate the weighted average
+  const weightedPercentage1 = a.value * a.weight;
+  const weightedPercentage2 = b.value * b.weight;
+  const averagePercentage = weightedPercentage1 + weightedPercentage2;
+
+  return averagePercentage;
+}
+
+
+const blobToArrayBuffer = (blob: Blob): Promise<string | Uint8Array> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const buffer = reader.result as ArrayBuffer;
+      resolve(new Uint8Array(buffer));
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(blob);
+  });
+};
+
+const fetchWithProgress = async (url: string, progressCallback?: (progress: number) => void): Promise<string | Uint8Array> => {
+  const response = await fetch(url);
+  const totalBytes: number = parseInt(response.headers.get('content-length') as string);
+  const reader = response.body!.getReader();
+  let receivedBytes = 0;
+  const chunks: Uint8Array[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    receivedBytes += value.length;
+    const currentProgress = Math.floor((receivedBytes / totalBytes) * 100);
+    if (progressCallback) progressCallback(currentProgress);
+    chunks.push(value);
+  }
+
+  const blob = new Blob(chunks);
+  const result = await blobToArrayBuffer(blob);
+
+  return result;
+};
+
 const Home: NextPage = () => {
   const [video, setVideo] = useState<any>(undefined)
   const [videoID, setVideoID] = useState<string | undefined>(undefined)
@@ -51,12 +102,33 @@ const Home: NextPage = () => {
   const [notifications, contextHolder] = notification.useNotification();
   const [inProgress, setInProgress] = useState<boolean>(false)
   const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
-  const [progress, setProgress] = useState<{ ratio: number }>({ ratio: 0 })
+  const [dlProgress, setDlProgress] = useState<{ video: number, audio: number }>({ video: 0, audio: 0 })
+  const dlProgressAvg = weightedPercentage({ weight: 0.7, value: dlProgress.video }, { weight: 0.3, value: dlProgress.audio })
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
 
   useEffect(() => {
-    if (!ffmpeg) { setFFmpeg(createFFmpeg({ log: true, corePath: `${process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://ytdl.shie1bi.hu"}/ffmpeg-core.js`, progress: (p) => setProgress(p) })) }
+    if (!ffmpeg) {
+      setFFmpeg(createFFmpeg({
+        log: true,
+        corePath: `${process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://ytdl.shie1bi.hu"}/ffmpeg-core.js`
+      }))
+    }
   }, [ffmpeg])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.search("mobile") > -1) {
+      notifications.error({
+        message: 'Unsupported device.',
+        description: 'This website is not supported on mobile devices.',
+        placement: 'bottomRight',
+        key: 'unsupported',
+        duration: 0,
+        icon: <IconDeviceMobileOff />
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (ffmpeg && !ffmpegReady) { ffmpeg.load(); setFFmpegReady(true) }
@@ -68,7 +140,7 @@ const Home: NextPage = () => {
     label: 'No Video',
     value: "off"
   }, ...video.videoStreams.filter((stream: any) =>
-    stream.mimeType.startsWith("video") && !stream.quality.startsWith("LBRY")
+    stream.mimeType.startsWith("video") && stream.quality.search("p") > -1 && !videoDisallowedITags.includes(stream.itag)
   ).map((stream: any) => {
     return {
       label: `${stream.quality} (${stream.mimeType})`,
@@ -92,7 +164,7 @@ const Home: NextPage = () => {
     label: 'No Audio',
     value: "off"
   }, ...video.audioStreams.filter((stream: any) =>
-    stream.mimeType.startsWith("audio") && stream.itag != 250
+    stream.mimeType.startsWith("audio") && !audioDisallowedITags.includes(stream.itag) && stream.mimeType.split("/")[1] !== "webm"
   ).map((stream: any) => {
     return {
       label: `${stream.quality} (${stream.mimeType})`,
@@ -174,6 +246,22 @@ const Home: NextPage = () => {
             }}
             style={{ backgroundImage: `url("${bg}")` }}
             className="bg" />}
+        {(inProgress) &&
+          <motion.div
+            initial={{
+              width: `${100 - dlProgressAvg}%`,
+              opacity: 0
+            }}
+            animate={{
+              width: `${100 - dlProgressAvg}%`,
+              opacity: 1
+            }}
+            exit={{
+              width: `${100 - dlProgressAvg}%`,
+              opacity: 0
+            }}
+            className="bg-filter" />
+        }
       </AnimatePresence>
       <div>
         <Typography.Title style={{ fontSize: '4rem', margin: 0 }} className="center horizontal vertical">
@@ -221,6 +309,8 @@ const Home: NextPage = () => {
                     setQuery(text)
                   })
                 }
+              }).catch((_err) => {
+                // no clipboard API (Firefox) 
               })
             }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => { if (ready) setModalOpen(true) }} onChange={(e) => {
               if (e.nativeEvent.type == "input") {
@@ -236,37 +326,48 @@ const Home: NextPage = () => {
           onCancel={() => setModalOpen(false)}
           onOk={async () => {
             if (!ffmpeg) return
+            const conversionId = (new Date()).getTime()
             setModalOpen(false)
             setInProgress(true)
             notifications.open({
-              message: 'Downloading video and audio streams...',
+              message: "Downloading video and audio streams...",
               description: 'This may take a while depending on the length and quality of the video and your internet connection',
               duration: 0,
               placement: 'bottomRight',
               key: 'download',
-              closeIcon: <></>,
+              className: 'noclose',
               icon: <Spin />,
             })
             const vStreamUrl = videoStream === "off" ? undefined : videoStream || video.videoStreams[1].url
             const aStreamUrl = audioStream === "off" ? undefined : audioStream || video.audioStreams[1].url
 
             if (vStreamUrl) {
-              const vStreamFile = await fetchFile(vStreamUrl);
-              ffmpeg.FS("writeFile", 'video', vStreamFile)
+              const vStreamFile = await fetchWithProgress(vStreamUrl, (progress) => {
+                setDlProgress((prev) => {
+                  if (!prev) return { video: progress, audio: 0 }
+                  return { ...prev, video: progress }
+                })
+              });
+              ffmpeg.FS("writeFile", `video-${conversionId}`, vStreamFile)
             }
 
             if (aStreamUrl) {
-              const aStreamFile = await fetchFile(aStreamUrl);
-              ffmpeg.FS("writeFile", 'audio', aStreamFile)
+              const aStreamFile = await fetchWithProgress(aStreamUrl, (progress) => {
+                setDlProgress((prev) => {
+                  if (!prev) return { video: 0, audio: progress }
+                  return { ...prev, audio: progress }
+                })
+              });
+              ffmpeg.FS("writeFile", `audio-${conversionId}`, aStreamFile)
             }
 
-            const videoS = !vStreamUrl ? '' : ` -i video`
-            const audioS = !aStreamUrl ? '' : ` -i audio`
+            const videoS = !vStreamUrl ? '' : ` -i video-${conversionId}`
+            const audioS = !aStreamUrl ? '' : ` -i audio-${conversionId}`
             let map = ""
             if (vStreamUrl && aStreamUrl) {
               map = ' -map 0:v:0 -map 1:a:0 -shortest -c:v copy -c:a copy'
             }
-            const command = `-y${videoS}${audioS}${map} -f ${container} output.${container}`
+            const command = `-y${videoS}${audioS}${map} -f ${container} output-${conversionId}.${container}`
             console.log(command)
             notifications.open({
               message: 'Merging video and audio streams...',
@@ -274,37 +375,51 @@ const Home: NextPage = () => {
               duration: 0,
               placement: 'bottomRight',
               key: 'download',
-              closeIcon: <></>,
+              className: 'noclose',
               icon: <IconMovie />,
             })
+            setDlProgress({ video: 0, audio: 0 })
             await ffmpeg.run(...command.split(' '))
-            notifications.success({
-              message: 'Conversion complete!',
-              description: 'Your video has been converted. The download should start shortly.',
-              placement: 'bottomRight',
-              key: 'download',
-              duration: 4.5,
-              icon: <IconCheck />
-            })
             setInProgress(false)
-            const data = ffmpeg.FS('readFile', `output.${container}`)
+            try {
+              const data = ffmpeg.FS('readFile', `output-${conversionId}.${container}`)
+              notifications.success({
+                message: 'Conversion complete!',
+                description: 'Your video has been converted. The download should start shortly.',
+                placement: 'bottomRight',
+                key: 'download',
+                duration: 4.5,
+                icon: <IconCheck />
+              })
+              const mediaType = videoStream != "off" && audioStream != 'off' ? 'video' : 'audio'
+              const url = URL.createObjectURL(new Blob([data.buffer], { type: `${mediaType}/${container}` }))
+              const link = document.createElement('a');
+              link.href = url;
+              link.setAttribute(
+                'download',
+                `${video.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '')}.${container}`,
+              );
+              // Append to html link element page
+              document.body.appendChild(link);
 
-            const mediaType = videoStream != "off" && audioStream != 'off' ? 'video' : 'audio'
-            const url = URL.createObjectURL(new Blob([data.buffer], { type: `${mediaType}/${container}` }))
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute(
-              'download',
-              `${video.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '')}.${container}`,
-            );
-            // Append to html link element page
-            document.body.appendChild(link);
+              // Start download
+              link.click();
 
-            // Start download
-            link.click();
-
-            // Clean up and remove the link
-            link.remove();
+              // Clean up and remove the link
+              link.remove();
+            } catch (err) {
+              notifications.error({
+                message: 'Conversion failed.',
+                description: 'Please try again with different settings.',
+                placement: 'bottomRight',
+                key: 'download',
+                icon: <IconX />,
+                duration: 4.5,
+              })
+              console.error(err)
+            } finally {
+              console.log("End of process // #" + conversionId)
+            }
           }}
         >
           {video && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '.5rem' }}>

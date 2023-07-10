@@ -26,10 +26,26 @@
   background-size: cover;
   background-position: center;
   background-attachment: scroll;
+  pointer-events: none;
   z-index: 0;
   filter: brightness(.3) contrast(.9) blur(10px);
 }
 
 #inner>*:not(.bg) {
   z-index: 1;
+}
+
+.noclose .ant-notification-notice-close {
+  display: none !important;
+}
+
+.bg-filter {
+  height: 100vh;
+  width: 100vw;
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+  backdrop-filter: saturate(0%);
 }
