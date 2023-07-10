@@ -15,6 +15,42 @@ const Home: NextPage = () => {
   const [videoStream, setVideoStream] = useState<string>("")
   const ready = video && bg
 
+  const videoStreams = !video ? [] : [{
+    label: 'No Video',
+    value: ""
+  }, ...video.videoStreams.filter((stream: any) =>
+    stream.mimeType.startsWith("video") && !stream.quality.startsWith("LBRY")
+  ).map((stream: any) => {
+    return {
+      label: `${stream.quality} (${stream.mimeType})`,
+      value: stream.url
+    }
+  }).sort((a: any, b: any) => {
+    // 1080p60 > 1080p > 720p60 > 720p > 480p > 360p > 240p > 144p
+    const aq = a.label.split(' ')[0]
+    const bq = b.label.split(' ')[0]
+    const aq2 = aq.split('p')[0]
+    const bq2 = bq.split('p')[0]
+    const aq3 = aq.split('p')[1]
+    const bq3 = bq.split('p')[1]
+    if (aq2 === bq2) {
+      return parseInt(bq3) - parseInt(aq3)
+    }
+    return parseInt(bq2) - parseInt(aq2)
+  })]
+
+  const audioStreams = !video ? [] : [{
+    label: 'No Audio',
+    value: ""
+  }, ...video.audioStreams.filter((stream: any) =>
+    stream.mimeType.startsWith("audio")
+  ).map((stream: any) => {
+    return {
+      label: `${stream.quality} (${stream.mimeType})`,
+      value: stream.url
+    }
+  })]
+
   useEffect(() => {
     setVideoID(undefined); setVideo(undefined); setBg(undefined)
     const id = getVideoIDFromURL(query)
@@ -75,7 +111,6 @@ const Home: NextPage = () => {
       <div style={{
         flexGrow: 1,
         alignSelf: 'stretch',
-        margin: 'auto',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
@@ -97,7 +132,7 @@ const Home: NextPage = () => {
         </AnimatePresence>
         <Input.Search loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
           setQuery(e.target.value)
-        }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '40rem' }} size="large" />
+        }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
         <Modal
           title="Download video"
           open={modalOpen}
@@ -126,48 +161,25 @@ const Home: NextPage = () => {
                 </Typography.Text>
               </div>
             </div>
-            <Space.Compact style={{ width: '100%' }}>
-              <div style={{ width: '50%' }}>
+            <div style={{
+              width: '100%',
+              gap: 0,
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              margin: 'auto',
+            }}>
+              <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Video</Typography.Text>
-                <Select options={[{
-                  label: 'No Video',
-                  value: ""
-                }, ...video.videoStreams.filter((stream: any) =>
-                  stream.mimeType.startsWith("video") && !stream.quality.startsWith("LBRY")
-                ).map((stream: any) => {
-                  return {
-                    label: `${stream.quality} (${stream.mimeType})`,
-                    value: stream.url
-                  }
-                }).sort((a: any, b: any) => {
-                  // 1080p60 > 1080p > 720p60 > 720p > 480p > 360p > 240p > 144p
-                  const aq = a.label.split(' ')[0]
-                  const bq = b.label.split(' ')[0]
-                  const aq2 = aq.split('p')[0]
-                  const bq2 = bq.split('p')[0]
-                  const aq3 = aq.split('p')[1]
-                  const bq3 = bq.split('p')[1]
-                  if (aq2 === bq2) {
-                    return parseInt(bq3) - parseInt(aq3)
-                  }
-                  return parseInt(bq2) - parseInt(aq2)
-                })]} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={video.videoStreams[0].url} />
+                <Select options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={videoStreams[1].value} />
               </div>
-              <div style={{ width: '50%' }}>
+              <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Audio</Typography.Text>
-                <Select options={[{
-                  label: 'No Audio',
-                  value: ""
-                }, ...video.audioStreams.filter((stream: any) =>
-                  stream.mimeType.startsWith("audio")
-                ).map((stream: any) => {
-                  return {
-                    label: `${stream.quality} (${stream.mimeType})`,
-                    value: stream.url
-                  }
-                })]} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={video.audioStreams[0].url} />
+                <Select options={audioStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={audioStreams[1].value} />
               </div>
-            </Space.Compact>
+            </div>
           </div>}
         </Modal>
       </div >
