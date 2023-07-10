@@ -105,8 +105,8 @@ const fetchWithProgress = async (url: string, params?: { timeout?: number, timeo
 };
 
 const Home: NextPage = (props: any) => {
-  const [video, setVideo] = useState<any>(props.videoDataPreload)
   const router = useRouter()
+  const [video, setVideo] = useState<any>(props.videoDataPreload)
   const [videoID, setVideoID] = useState<string | undefined>(props.videoID)
   const [bg, setBg] = useState<any>(undefined)
   const [query, setQuery] = useState<string>(router.query["v"] ? "https://youtu.be/" + router.query["v"] as string : "")
@@ -119,6 +119,8 @@ const Home: NextPage = (props: any) => {
   const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
   const [dlProgress, setDlProgress] = useState<{ video: number, audio: number }>({ video: 0, audio: 0 })
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
+  const [prefsOpen, setPrefsOpen] = useState<boolean>(false)
+  const [containerIsString, setContainerIsString] = useState<boolean>(false)
   const dlProgressAvg = weightedPercentage({ weight: videoStream !== 'off' ? 0.7 : 0, value: dlProgress.video }, { weight: audioStream !== 'off' ? 0.3 : 0, value: dlProgress.audio })
 
   useEffect(() => {
@@ -216,7 +218,7 @@ const Home: NextPage = (props: any) => {
   }).map((c) => c.value)
 
   useEffect(() => {
-    if (!availableContainers.includes(container)) setContainer(availableContainers[0])
+    if (!containerIsString && !availableContainers.includes(container)) setContainer(availableContainers[0])
   }, [availableContainers])
 
   useEffect(() => {
@@ -246,10 +248,10 @@ const Home: NextPage = (props: any) => {
   //cut off metadesc at 167 characters and add ... to the end
   const metaDescription = (
     (props.videoDataPreload
-      ? `Download ${props.videoDataPreload.title} video from ${props.videoDataPreload.uploader}: ` + props.videoDataPreload.description.replace(/(<([^>]+)>)/gi, "")
+      ? `Download ${props.videoDataPreload.title} YouTube video from ${props.videoDataPreload.uploader}: ` + props.videoDataPreload.description.replace(/(<([^>]+)>)/gi, "")
       : "Unlock the Speed of YouTube Downloads! Experience lightning-fast video downloads like never before with our cutting-edge website. Download your favorite YouTube videos with blazing speed and incredible ease. Say goodbye to buffering and waiting, and say hello to instant gratification. Try it now and discover the fastest way to download YouTube videos!") as string
   ).substring(0, 167) + "..."
-  const metaTitle = (props.videoDataPreload ? `${props.videoDataPreload.title} | ` : "") + "Shibi-YTDL"
+  const metaTitle = (props.videoDataPreload ? `Download "${props.videoDataPreload.title}" with ` : "") + "Shibi-YTDL"
   const metaImage = props.videoDataPreload ? props.videoDataPreload.thumbnailUrl : ""
 
   return <>
@@ -556,19 +558,57 @@ const Home: NextPage = (props: any) => {
                 <Select value={audioStream || audioStreams[1].value} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} />
               </div>
               <div style={{ flex: 1, minWidth: 179 }}>
-                <Typography.Text style={{ fontSize: '.8rem' }}>Container</Typography.Text>
-                <Select value={container} options={availableContainers.map((container) => {
-                  return {
-                    label: container,
-                    value: container
-                  }
-                })} style={{ width: '100%' }} onChange={setContainer} defaultValue={availableContainers[0]} />
+                <Typography.Text style={{ fontSize: '.8rem' }}>Container - <span onClick={() => { setContainerIsString(old => !old) }} style={{ textDecoration: 'underline', cursor: 'pointer', userSelect: 'none' }}>switch to {containerIsString ? "normal" : "custom"}</span></Typography.Text>
+                <AnimatePresence>
+                  {!containerIsString && (<motion.div
+                    initial={{
+                      opacity: 0,
+                    }}
+                    animate={{
+                      opacity: 1,
+                    }}
+                    exit={{
+                      opacity: 0,
+                    }}
+                  ><Select value={container} options={availableContainers.map((container) => {
+                    return {
+                      label: container,
+                      value: container
+                    }
+                  })} style={{ width: '100%' }} onChange={setContainer} defaultValue={availableContainers[0]} /></motion.div>)}
+                  {containerIsString && (<motion.div
+                    initial={{
+                      opacity: 0,
+                    }}
+                    animate={{
+                      opacity: 1,
+                    }}
+                    exit={{
+                      opacity: 0,
+                    }}
+                  ><Input value={container} style={{ width: '100%' }} onChange={(e) => setContainer(e.currentTarget.value)} defaultValue={availableContainers[0]} /></motion.div>)}
+                </AnimatePresence>
               </div>
             </div>
           </div>}
         </Modal>
       </div >
-      <div className="center horizontal vertical">
+      <Modal
+        title="Preferences"
+        open={prefsOpen}
+        onCancel={() => setPrefsOpen(false)}
+        onOk={() => {
+          setPrefsOpen(false)
+        }}
+      >
+
+      </Modal>
+      <div className="center horizontal vertical" style={{
+        flexDirection: 'column'
+      }}>
+        <Typography.Text onClick={() => setPrefsOpen(true)} style={{ fontSize: '1.2rem', cursor: 'pointer', textDecoration: 'underline' }}>
+          Open preferences
+        </Typography.Text>
         <Typography.Text style={{ fontSize: '1rem' }}>
           Made with Next.js, Ant Design, Framer Motion, Piped and FFmpeg{"(WASM)"}.
         </Typography.Text>
@@ -590,7 +630,7 @@ export async function getServerSideProps(context: any) {
   return {
     props: {
       videoID,
-      videoDataPreload: videoID ? await apiCall("GET", `${PIPED}/streams/${videoID}`) : undefined,
+      videoDataPreload: videoID ? await apiCall("GET", `${PIPED}/streams/${videoID}`) : null,
     },
   };
 }

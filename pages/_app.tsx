@@ -14,6 +14,7 @@ export default function App({ Component, pageProps }: AppProps) {
       <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
       <link rel='icon' type="image/x-icon" href='/favicon.ico' />
       <meta property="og:type" content="website" />
+      <meta name="theme-color" content="#790303" />
       <meta property="twitter:card" content="summary_large_image" />
     </Head>
     <ConfigProvider theme={{
