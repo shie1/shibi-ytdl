@@ -3,7 +3,7 @@ import { Input, Typography, Modal, Select, Spin, notification } from "antd";
 import { motion, AnimatePresence } from "framer-motion"
 import { useEffect, useState } from "react";
 import { getVideoIDFromURL } from "@/components/strings"
-import { apiCall } from "@/components/api"
+import { apiCall, getHost } from "@/components/api"
 import Image from "next/image"
 import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -55,7 +55,7 @@ const Home: NextPage = () => {
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
 
   useEffect(() => {
-    if (!ffmpeg) { setFFmpeg(createFFmpeg({ log: true, corePath: "http://localhost:3000/ffmpeg-core.js", progress: (p) => setProgress(p) })) }
+    if (!ffmpeg) { setFFmpeg(createFFmpeg({ log: true, corePath: `${process.env.NODE_ENV === "development" ? "http://localhost:3000" : "https://ytdl.shie1bi.hu"}/ffmpeg-core.js`, progress: (p) => setProgress(p) })) }
   }, [ffmpeg])
 
   useEffect(() => {
