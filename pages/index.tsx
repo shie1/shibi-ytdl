@@ -252,38 +252,53 @@ const Home: NextPage = () => {
       width: '100%',
       position: 'relative',
     }}>
-      <AnimatePresence>
-        {ready &&
-          <motion.div
-            key={videoID}
-            initial={{
-              transform: `scale(1.2) translateY(5vh) rotate(0deg) translateX(${bg ? -100 : 0}vw)`
-            }}
-            animate={{
-              transform: `scale(1.2) translateY(0vh) rotate(5deg) translateX(${bg ? 0 : -100}vw)`
-            }}
-            exit={{
-              transform: `scale(1.2) translateY(-10vh) rotate(15deg) translateX(${bg ? 100 : 0}vw)`
-            }}
-            style={{ backgroundImage: `url("${bg}")` }}
-            className="bg" />}
-        {(inProgress) &&
-          <motion.div
-            initial={{
-              width: `${100 - dlProgressAvg}%`,
-              opacity: 0
-            }}
-            animate={{
-              width: `${100 - dlProgressAvg}%`,
-              opacity: 1
-            }}
-            exit={{
-              width: `${100 - dlProgressAvg}%`,
-              opacity: 0
-            }}
-            className="bg-filter" />
-        }
-      </AnimatePresence>
+      <div className="bg-container">
+        <AnimatePresence>
+          {ready &&
+            <motion.div
+              key={videoID}
+              initial={{
+                transform: `scale(1.2) translateY(5vh) rotate(0deg) translateX(${bg ? -100 : 0}vw)`
+              }}
+              animate={{
+                transform: `scale(1.2) translateY(0vh) rotate(5deg) translateX(${bg ? 0 : -100}vw)`
+              }}
+              exit={{
+                transform: `scale(1.2) translateY(-10vh) rotate(15deg) translateX(${bg ? 100 : 0}vw)`
+              }}
+              style={{ backgroundImage: `url("${bg}")` }}
+              className="bg" />}
+          {(inProgress) &&
+            <motion.div
+              key="topbar"
+              initial={{
+                width: '0vw',
+              }}
+              animate={{
+                width: `100vw`,
+              }}
+              exit={{
+                width: '0vw',
+              }}
+              className="bg-top-bar" />}
+          {(inProgress) &&
+            <motion.div
+              initial={{
+                width: `${100 - dlProgressAvg}%`,
+                opacity: 0
+              }}
+              animate={{
+                width: `${100 - dlProgressAvg}%`,
+                opacity: 1
+              }}
+              exit={{
+                width: `${100 - dlProgressAvg}%`,
+                opacity: 0
+              }}
+              className="bg-filter" />
+          }
+        </AnimatePresence>
+      </div>
       <div>
         <Typography.Title style={{ fontSize: '4rem', margin: 0 }} className="center horizontal vertical">
           /Shibi-YTDL/

@@ -28,10 +28,10 @@
   background-attachment: scroll;
   pointer-events: none;
   z-index: 0;
-  filter: brightness(.3) contrast(.9) blur(10px);
+  filter: brightness(.3) saturate(2) contrast(.9) blur(10px);
 }
 
-#inner>*:not(.bg) {
+#inner>*:not(.bg-container) {
   z-index: 1;
 }
 
@@ -48,4 +48,15 @@
   z-index: 1;
   pointer-events: none;
   backdrop-filter: saturate(0%);
+}
+
+.bg-top-bar {
+  height: 1vh;
+  position: fixed !important;
+  bottom: 0;
+  left: 0;
+  position: relative;
+  background-color: #790303;
+  pointer-events: none;
+  z-index: 0;
 }
