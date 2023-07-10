@@ -10,6 +10,7 @@ import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { IconCheck, IconDeviceMobileOff, IconMovie, IconX } from "@tabler/icons-react"
 import Head from "next/head"
 import axios, { AxiosResponse, CancelTokenSource, Canceler } from "axios";
+import { useRouter } from "next/router";
 
 const PIPED = "https://api-piped.mha.fi"
 
@@ -103,11 +104,12 @@ const fetchWithProgress = async (url: string, params?: { timeout?: number, timeo
   }
 };
 
-const Home: NextPage = () => {
-  const [video, setVideo] = useState<any>(undefined)
-  const [videoID, setVideoID] = useState<string | undefined>(undefined)
+const Home: NextPage = (props: any) => {
+  const [video, setVideo] = useState<any>(props.videoDataPreload)
+  const router = useRouter()
+  const [videoID, setVideoID] = useState<string | undefined>(props.videoID)
   const [bg, setBg] = useState<any>(undefined)
-  const [query, setQuery] = useState<string>("")
+  const [query, setQuery] = useState<string>(router.query["v"] ? "https://youtu.be/" + router.query["v"] as string : "")
   const [modalOpen, setModalOpen] = useState<boolean>(false)
   const [videoStream, setVideoStream] = useState<string | undefined>()
   const [audioStream, setAudioStream] = useState<string | undefined>()
@@ -184,7 +186,7 @@ const Home: NextPage = () => {
     stream.mimeType.startsWith("audio") && !audioDisallowedITags.includes(stream.itag) && stream.mimeType.split("/")[1] !== "webm"
   ).map((stream: any) => {
     return {
-      label: `${stream.quality} (${stream.mimeType})`,
+      label: !stream.quality.startsWith("0") ? `${stream.quality} (${stream.mimeType})` : `default (${stream.mimeType})`,
       value: stream.url
     }
   }).sort((a: any, b: any) => {
@@ -218,14 +220,15 @@ const Home: NextPage = () => {
   }, [availableContainers])
 
   useEffect(() => {
-    setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer("mp4")
     const id = getVideoIDFromURL(query)
+    if (id != props.videoID) { setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer("mp4") }
     if (!query || !id) { return }
     setVideoID(id)
   }, [query])
 
   useEffect(() => {
     if (!videoID) return
+    if (videoID == video?.thumbnailUrl.split("/")[4]) { return }
     apiCall("GET", `${PIPED}/streams/${videoID}`).then((res) => {
       setVideo(res)
     })
@@ -240,9 +243,31 @@ const Home: NextPage = () => {
     })
   }, [video])
 
+  //cut off metadesc at 167 characters and add ... to the end
+  const metaDescription = (
+    (props.videoDataPreload
+      ? `Download ${props.videoDataPreload.title} video from ${props.videoDataPreload.uploader}: ` + props.videoDataPreload.description.replace(/(<([^>]+)>)/gi, "")
+      : "Unlock the Speed of YouTube Downloads! Experience lightning-fast video downloads like never before with our cutting-edge website. Download your favorite YouTube videos with blazing speed and incredible ease. Say goodbye to buffering and waiting, and say hello to instant gratification. Try it now and discover the fastest way to download YouTube videos!") as string
+  ).substring(0, 167) + "..."
+  const metaTitle = (props.videoDataPreload ? `${props.videoDataPreload.title} | ` : "") + "Shibi-YTDL"
+  const metaImage = props.videoDataPreload ? props.videoDataPreload.thumbnailUrl : ""
+
   return <>
     <Head>
-      <title>Shibi-YTDL</title>
+      <meta name="description" content={metaDescription} />
+
+      <meta property="og:url" content="https://ytdl.shie1bi.hu" />
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content={metaTitle} />
+      <meta property="og:description" content={metaDescription} />
+      <meta property="og:image" content={metaImage} />
+
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta property="twitter:domain" content="ytdl.shie1bi.hu" />
+      <meta property="twitter:url" content="https://ytdl.shie1bi.hu" />
+      <meta name="twitter:title" content={metaTitle} />
+      <meta name="twitter:description" content={metaDescription} />
+      <meta name="twitter:image" content={metaImage} />
     </Head>
     {contextHolder}
     <motion.div id="inner" style={{
@@ -556,8 +581,17 @@ export async function getServerSideProps(context: any) {
   context.res.setHeader('Cache-Control', 'no-store');
   context.res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   context.res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+
+  let videoID: string = ""
+  if (context.query["v"]) {
+    videoID = context.query["v"]
+  }
+
   return {
-    props: {},
+    props: {
+      videoID,
+      videoDataPreload: videoID ? await apiCall("GET", `${PIPED}/streams/${videoID}`) : undefined,
+    },
   };
 }
 
