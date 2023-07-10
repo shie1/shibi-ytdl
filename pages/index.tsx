@@ -48,9 +48,14 @@ const weightedPercentage = (a: { weight: number, value: number }, b: { weight: n
   a.value = Math.min(Math.max(a.value, 0), 100);
   b.value = Math.min(Math.max(b.value, 0), 100);
 
+  // Normalize the weights
+  const totalWeight = a.weight + b.weight;
+  const normalizedWeight1 = a.weight / totalWeight;
+  const normalizedWeight2 = b.weight / totalWeight;
+
   // Calculate the weighted average
-  const weightedPercentage1 = a.value * a.weight;
-  const weightedPercentage2 = b.value * b.weight;
+  const weightedPercentage1 = a.value * normalizedWeight1;
+  const weightedPercentage2 = b.value * normalizedWeight2;
   const averagePercentage = weightedPercentage1 + weightedPercentage2;
 
   return averagePercentage;
@@ -111,8 +116,8 @@ const Home: NextPage = () => {
   const [inProgress, setInProgress] = useState<boolean>(false)
   const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
   const [dlProgress, setDlProgress] = useState<{ video: number, audio: number }>({ video: 0, audio: 0 })
-  const dlProgressAvg = weightedPercentage({ weight: 0.7, value: dlProgress.video }, { weight: 0.3, value: dlProgress.audio })
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
+  const dlProgressAvg = weightedPercentage({ weight: videoStream !== 'off' ? 0.7 : 0, value: dlProgress.video }, { weight: audioStream !== 'off' ? 0.3 : 0, value: dlProgress.audio })
 
   useEffect(() => {
     if (!ffmpeg) {
