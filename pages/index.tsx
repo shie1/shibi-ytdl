@@ -204,7 +204,7 @@ const Home: NextPage = () => {
               exit={{ height: 0 }}
               style={{ overflow: 'hidden', marginBottom: '0.5rem' }}
             >
-              <Image draggable={false} alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '26dvh', width: 'auto', marginBottom: '.5rem', borderRadius: 10 }} />
+              <Image draggable={false} alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '26dvh', maxHeight: '50vmin', width: 'auto', marginBottom: '.5rem', borderRadius: 10 }} />
               <Typography.Title style={{ fontSize: '1.8rem', textOverflow: 'ellipsis', overflow: 'hidden', width: '100%', margin: 0, lineClamp: 2, WebkitLineClamp: 2, display: "-webkit-box", WebkitBoxOrient: 'vertical' }} className="center horizontal vertical">{video.title}</Typography.Title>
               <Typography.Text style={{ fontSize: '1rem' }} className="center horizontal vertical">{video.uploader}</Typography.Text>
             </motion.div>
@@ -227,7 +227,7 @@ const Home: NextPage = () => {
                   })
                 }
               })
-            }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
+            }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => { if (ready) setModalOpen(true) }} onChange={(e) => {
               if (e.nativeEvent.type == "input") {
                 setQuery(e.target.value)
               } else if (e.nativeEvent.type == "insertFromPaste") {
@@ -237,7 +237,7 @@ const Home: NextPage = () => {
         </motion.div>
         <Modal
           title="Download video"
-          open={modalOpen}
+          open={modalOpen && ready}
           onCancel={() => setModalOpen(false)}
           onOk={async () => {
             if (!ffmpeg) return
@@ -356,19 +356,22 @@ const Home: NextPage = () => {
                 <Typography.Text style={{ fontSize: '.8rem' }}>Audio</Typography.Text>
                 <Select value={audioStream || audioStreams[1].value} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} />
               </div>
-              <Select value={container} options={availableContainers.map((container) => {
-                return {
-                  label: container,
-                  value: container
-                }
-              })} style={{ flex: 1, minWidth: 179 }} onChange={setContainer} defaultValue={availableContainers[0]} />
+              <div style={{ flex: 1, minWidth: 179 }}>
+                <Typography.Text style={{ fontSize: '.8rem' }}>Container</Typography.Text>
+                <Select value={container} options={availableContainers.map((container) => {
+                  return {
+                    label: container,
+                    value: container
+                  }
+                })} style={{ width: '100%' }} onChange={setContainer} defaultValue={availableContainers[0]} />
+              </div>
             </div>
           </div>}
         </Modal>
       </div >
       <div className="center horizontal vertical">
         <Typography.Text style={{ fontSize: '1rem' }}>
-          Made with Next.js, Ant Design, Framer Motion, Piped and a no-bullshit mentality.
+          Made with Next.js, Ant Design, Framer Motion, Piped and FFmpeg{"(WASM)"}.
         </Typography.Text>
       </div>
     </motion.div >
