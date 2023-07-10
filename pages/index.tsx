@@ -1,11 +1,14 @@
 import type { NextPage } from "next"
-import { Input, Typography, Modal, Select, Space, Spin, notification } from "antd"
+import { Input, Typography, Modal, Select, Spin, notification } from "antd";
 import { motion, AnimatePresence } from "framer-motion"
-import { use, useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react";
 import { getVideoIDFromURL } from "@/components/strings"
-import { apiCall, download } from "@/components/api"
+import { apiCall } from "@/components/api"
 import Image from "next/image"
-import { IconCheck } from "@tabler/icons-react"
+import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
+import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { IconCheck, IconMovie } from "@tabler/icons-react"
+import Head from "next/head"
 
 const PIPED = "https://api-piped.mha.fi"
 
@@ -18,6 +21,22 @@ const containers = [
     value: "mp3",
     type: "audio"
   },
+  {
+    value: "flac",
+    type: "audio"
+  },
+  {
+    value: "wav",
+    type: "audio"
+  },
+  {
+    value: "mov",
+    type: "video"
+  },
+  {
+    value: "avi",
+    type: "video"
+  }
 ]
 
 const Home: NextPage = () => {
@@ -31,6 +50,17 @@ const Home: NextPage = () => {
   const [container, setContainer] = useState<string>("mp4")
   const [notifications, contextHolder] = notification.useNotification();
   const [inProgress, setInProgress] = useState<boolean>(false)
+  const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
+  const [progress, setProgress] = useState<{ ratio: number }>({ ratio: 0 })
+  const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (!ffmpeg) { setFFmpeg(createFFmpeg({ log: true, corePath: "http://localhost:3000/ffmpeg-core.js", progress: (p) => setProgress(p) })) }
+  }, [ffmpeg])
+
+  useEffect(() => {
+    if (ffmpeg && !ffmpegReady) { ffmpeg.load(); setFFmpegReady(true) }
+  }, [ffmpeg, ffmpegReady])
 
   const ready = video && bg
 
@@ -62,7 +92,7 @@ const Home: NextPage = () => {
     label: 'No Audio',
     value: "off"
   }, ...video.audioStreams.filter((stream: any) =>
-    stream.mimeType.startsWith("audio")
+    stream.mimeType.startsWith("audio") && stream.itag != 250
   ).map((stream: any) => {
     return {
       label: `${stream.quality} (${stream.mimeType})`,
@@ -122,7 +152,10 @@ const Home: NextPage = () => {
     })
   }, [video])
 
-  return (<>
+  return <>
+    <Head>
+      <title>Shibi-YTDL</title>
+    </Head>
     {contextHolder}
     <motion.div id="inner" style={{
       display: 'flex',
@@ -143,9 +176,6 @@ const Home: NextPage = () => {
             }}
             exit={{
               transform: `scale(1.2) translateY(-10vh) rotate(15deg) translateX(${bg ? 100 : 0}vw)`
-            }}
-            onAnimationComplete={() => {
-              console.log("animation complete")
             }}
             style={{ backgroundImage: `url("${bg}")` }}
             className="bg" />}
@@ -181,55 +211,105 @@ const Home: NextPage = () => {
           </>}
         </AnimatePresence>
         <motion.div animate={{ width: '100%' }} layout>
-          <Input.Search disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
-            setQuery(e.target.value)
-          }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
+          <Input.Search
+            onPaste={(e) => {
+              e.preventDefault()
+              setQuery(e.clipboardData.getData('Text'))
+            }}
+            onClick={() => {
+              //check for clipboard permission
+              navigator.permissions.query({ name: "clipboard-read" as any }).then((result) => {
+                if (result.state == "granted" || result.state == "prompt") {
+                  navigator.clipboard.readText().then((text) => {
+                    const id = getVideoIDFromURL(text)
+                    if (!id) return
+                    setQuery(text)
+                  })
+                }
+              })
+            }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => setModalOpen(true)} onChange={(e) => {
+              if (e.nativeEvent.type == "input") {
+                setQuery(e.target.value)
+              } else if (e.nativeEvent.type == "insertFromPaste") {
+                e.preventDefault()
+              }
+            }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
         </motion.div>
         <Modal
           title="Download video"
           open={modalOpen}
           onCancel={() => setModalOpen(false)}
-          onOk={() => {
+          onOk={async () => {
+            if (!ffmpeg) return
+            setModalOpen(false)
             setInProgress(true)
             notifications.open({
-              message: 'Converting video...',
-              description: 'Your video is being converted. This may take a while.',
+              message: 'Downloading video and audio streams...',
+              description: 'This may take a while depending on the length and quality of the video and your internet connection',
               duration: 0,
               placement: 'bottomRight',
               key: 'download',
               closeIcon: <></>,
               icon: <Spin />,
             })
-            download("/api/download", {
-              videoStream: videoStream === "off" ? undefined : videoStream || videoStreams[1].value,
-              audioStream: audioStream === "off" ? undefined : audioStream || audioStreams[1].value,
-              container,
-            }).then((url) => {
-              setInProgress(false)
-              notifications.success({
-                message: 'Conversion complete!',
-                description: 'Your video has been converted. The download should start shortly.',
-                placement: 'bottomRight',
-                key: 'download',
-                duration: 4.5,
-                icon: <IconCheck />
-              })
-              const link = document.createElement('a');
-              link.href = url;
-              link.setAttribute(
-                'download',
-                `${video.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '')}.${container}`,
-              );
-              // Append to html link element page
-              document.body.appendChild(link);
+            const vStreamUrl = videoStream === "off" ? undefined : videoStream || video.videoStreams[1].url
+            const aStreamUrl = audioStream === "off" ? undefined : audioStream || video.audioStreams[1].url
 
-              // Start download
-              link.click();
+            if (vStreamUrl) {
+              const vStreamFile = await fetchFile(vStreamUrl);
+              ffmpeg.FS("writeFile", 'video', vStreamFile)
+            }
 
-              // Clean up and remove the link
-              link.remove();
+            if (aStreamUrl) {
+              const aStreamFile = await fetchFile(aStreamUrl);
+              ffmpeg.FS("writeFile", 'audio', aStreamFile)
+            }
+
+            const videoS = !vStreamUrl ? '' : ` -i video`
+            const audioS = !aStreamUrl ? '' : ` -i audio`
+            let map = ""
+            if (vStreamUrl && aStreamUrl) {
+              map = ' -map 0:v:0 -map 1:a:0 -shortest -c:v copy -c:a copy'
+            }
+            const command = `-y${videoS}${audioS}${map} -f ${container} output.${container}`
+            console.log(command)
+            notifications.open({
+              message: 'Merging video and audio streams...',
+              description: `Using your hardware to merge the streams.`,
+              duration: 0,
+              placement: 'bottomRight',
+              key: 'download',
+              closeIcon: <></>,
+              icon: <IconMovie />,
             })
-            setModalOpen(false)
+            await ffmpeg.run(...command.split(' '))
+            notifications.success({
+              message: 'Conversion complete!',
+              description: 'Your video has been converted. The download should start shortly.',
+              placement: 'bottomRight',
+              key: 'download',
+              duration: 4.5,
+              icon: <IconCheck />
+            })
+            setInProgress(false)
+            const data = ffmpeg.FS('readFile', `output.${container}`)
+
+            const mediaType = videoStream != "off" && audioStream != 'off' ? 'video' : 'audio'
+            const url = URL.createObjectURL(new Blob([data.buffer], { type: `${mediaType}/${container}` }))
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute(
+              'download',
+              `${video.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().replace(/^_+|_+$/g, '')}.${container}`,
+            );
+            // Append to html link element page
+            document.body.appendChild(link);
+
+            // Start download
+            link.click();
+
+            // Clean up and remove the link
+            link.remove();
           }}
         >
           {video && <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '.5rem' }}>
@@ -270,11 +350,11 @@ const Home: NextPage = () => {
             }}>
               <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Video</Typography.Text>
-                <Select value={videoStream} options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} defaultValue={videoStreams[1].value} />
+                <Select value={videoStream || videoStreams[1].value} options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} />
               </div>
               <div style={{ flex: 1, minWidth: 179 }}>
                 <Typography.Text style={{ fontSize: '.8rem' }}>Audio</Typography.Text>
-                <Select value={audioStream} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} defaultValue={audioStreams[1].value} />
+                <Select value={audioStream || audioStreams[1].value} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} />
               </div>
               <Select value={container} options={availableContainers.map((container) => {
                 return {
@@ -292,7 +372,16 @@ const Home: NextPage = () => {
         </Typography.Text>
       </div>
     </motion.div >
-  </>)
+  </>;
+}
+
+export async function getServerSideProps(context: any) {
+  // set HTTP header
+  context.res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  context.res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  return {
+    props: {},
+  };
 }
 
 export default Home
