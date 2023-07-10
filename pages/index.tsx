@@ -116,6 +116,10 @@ const Home: NextPage = () => {
   }, [ffmpeg])
 
   useEffect(() => {
+    if (!inProgress) setDlProgress({ video: 0, audio: 0 })
+  }, [inProgress])
+
+  useEffect(() => {
     if (typeof window === "undefined") return
     const ua = navigator.userAgent.toLowerCase();
     if (ua.search("mobile") > -1) {
@@ -378,7 +382,6 @@ const Home: NextPage = () => {
               className: 'noclose',
               icon: <IconMovie />,
             })
-            setDlProgress({ video: 0, audio: 0 })
             await ffmpeg.run(...command.split(' '))
             setInProgress(false)
             try {
