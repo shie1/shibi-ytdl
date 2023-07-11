@@ -60,3 +60,12 @@
   pointer-events: none;
   z-index: 0;
 }
+
+.display-on-hover {
+  opacity: 0;
+  transition: opacity .2s ease-in-out;
+}
+
+.display-on-hover:hover {
+  opacity: 1;
+}

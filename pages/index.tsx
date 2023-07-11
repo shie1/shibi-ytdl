@@ -7,7 +7,7 @@ import { apiCall } from "@/components/api";
 import Image from "next/image"
 import { createFFmpeg } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
-import { IconCheck, IconDeviceMobileOff, IconMovie, IconX } from "@tabler/icons-react"
+import { IconCheck, IconDeviceMobileOff, IconExternalLink, IconMovie, IconX } from "@tabler/icons-react"
 import Head from "next/head"
 import axios, { AxiosResponse } from "axios";
 import { useRouter } from "next/router";
@@ -332,7 +332,7 @@ const Home: NextPage = (props: any) => {
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', flexDirection: 'column' }} >
         <Typography.Title style={{ fontSize: '4rem', margin: 0, display: 'inline-block', textAlign: 'center' }}>
-          <span><Image alt="Shibi-YTDL logo" width={75} height={75} src="/logo.png" /> </span>
+          <span><Image draggable={false} alt="Shibi-YTDL logo" width={75} height={75} src="/logo.png" /> </span>
           <span>/Shibi-YTDL/</span>
         </Typography.Title>
         <Typography.Text style={{ fontSize: '2rem' }} className="center horizontal vertical">
@@ -355,7 +355,36 @@ const Home: NextPage = (props: any) => {
               exit={{ height: 0 }}
               style={{ overflow: 'hidden', marginBottom: '0.5rem' }}
             >
-              <Image draggable={false} alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '26dvh', maxHeight: '50vmin', width: 'auto', marginBottom: '.5rem', borderRadius: 10 }} />
+              <div style={{
+                height: '26dvh',
+                maxHeight: '50vmin',
+                width: 'min-content',
+                margin: 'auto',
+                marginBottom: '.5rem',
+                borderRadius: 10,
+                overflow: 'hidden',
+                position: 'relative'
+              }}>
+                <div
+                  className="display-on-hover"
+                  onClick={() => { window.open(`https://youtu.be/${videoID}`) }}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    background: 'rgba(0,0,0,.4)',
+                  }}
+                >
+                  <IconExternalLink color="white" size={50} />
+                </div>
+                <Image draggable={false} alt={video.title} src={bg} width={1280} height={720} style={{ objectFit: 'contain', height: '26dvh', maxHeight: '50vmin', width: 'auto', marginBottom: '.5rem', }} />
+              </div>
               <Typography.Title style={{ fontSize: '1.8rem', textOverflow: 'ellipsis', overflow: 'hidden', width: '100%', margin: 0, lineClamp: 2, WebkitLineClamp: 2, display: "-webkit-box", WebkitBoxOrient: 'vertical' }} className="center horizontal vertical">{video.title}</Typography.Title>
               <Typography.Text style={{ fontSize: '1rem' }} className="center horizontal vertical">{video.uploader}</Typography.Text>
             </motion.div>
@@ -611,7 +640,7 @@ const Home: NextPage = (props: any) => {
       <div className="center horizontal vertical" style={{
         flexDirection: 'column'
       }}>
-        <Typography.Text onClick={() => setPrefsOpen(true)} style={{ fontSize: '1.2rem', cursor: 'pointer', textDecoration: 'underline' }}>
+        <Typography.Text onClick={() => setPrefsOpen(true)} style={{ display: 'none', fontSize: '1.2rem', cursor: 'pointer', textDecoration: 'underline' }}>
           Open preferences
         </Typography.Text>
         <Typography.Text style={{ fontSize: '1rem' }}>
