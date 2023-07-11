@@ -332,7 +332,7 @@ const Home: NextPage = (props: any) => {
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', flexDirection: 'column' }} >
         <Typography.Title style={{ fontSize: '4rem', margin: 0, display: 'inline-block', textAlign: 'center' }}>
-          <span><Image draggable={false} alt="Shibi-YTDL logo" width={75} height={75} src="/logo.png" /> </span>
+          <span style={{ verticalAlign: "bottom" }}><Image draggable={false} alt="Shibi-YTDL logo" width={75} height={75} src="/logo.png" /> </span>
           <span>/Shibi-YTDL/</span>
         </Typography.Title>
         <Typography.Text style={{ fontSize: '2rem' }} className="center horizontal vertical">
