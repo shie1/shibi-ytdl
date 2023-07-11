@@ -1,15 +1,15 @@
 import type { NextPage } from "next"
 import { Input, Typography, Modal, Select, Spin, notification } from "antd";
 import { motion, AnimatePresence } from "framer-motion"
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { getVideoIDFromURL } from "@/components/strings"
-import { apiCall, getHost } from "@/components/api"
+import { apiCall } from "@/components/api";
 import Image from "next/image"
-import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
+import { createFFmpeg } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { IconCheck, IconDeviceMobileOff, IconMovie, IconX } from "@tabler/icons-react"
 import Head from "next/head"
-import axios, { AxiosResponse, CancelTokenSource, Canceler } from "axios";
+import axios, { AxiosResponse } from "axios";
 import { useRouter } from "next/router";
 
 const PIPED = "https://api-piped.mha.fi"
@@ -18,6 +18,10 @@ const videoDisallowedITags: Array<number> = []
 const audioDisallowedITags: Array<number> = []
 
 const containers = [
+  {
+    value: "gif",
+    type: "videoonly",
+  },
   {
     value: "mp4",
     type: "video"
@@ -207,7 +211,7 @@ const Home: NextPage = (props: any) => {
         return true
       }
     } else {
-      if (c.type === "video" && videoStream !== "off") {
+      if ((c.type === "video" || c.type === "videoonly") && videoStream !== "off") {
         return true
       }
       if (c.type === "audio" && audioStream !== "off") {
@@ -326,9 +330,10 @@ const Home: NextPage = (props: any) => {
           }
         </AnimatePresence>
       </div>
-      <div>
-        <Typography.Title style={{ fontSize: '4rem', margin: 0 }} className="center horizontal vertical">
-          /Shibi-YTDL/
+      <div style={{ display: 'flex', justifyContent: 'center', flexDirection: 'column' }} >
+        <Typography.Title style={{ fontSize: '4rem', margin: 0, display: 'inline-block', textAlign: 'center' }}>
+          <span><Image alt="Shibi-YTDL logo" width={75} height={75} src="/logo.png" /> </span>
+          <span>/Shibi-YTDL/</span>
         </Typography.Title>
         <Typography.Text style={{ fontSize: '2rem' }} className="center horizontal vertical">
           A simple YouTube downloader
