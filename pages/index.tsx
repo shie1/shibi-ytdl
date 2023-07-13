@@ -1,7 +1,7 @@
 import type { NextPage } from "next"
 import { Input, Typography, Modal, Select, Spin, notification, Divider } from "antd";
 import { motion, AnimatePresence } from "framer-motion"
-import { Dispatch, SetStateAction, memo, useEffect, useState } from "react";
+import { Dispatch, SetStateAction, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { getVideoIDFromURL } from "@/components/strings"
 import { apiCall } from "@/components/api";
 import Image from "next/image"
@@ -14,7 +14,8 @@ import { useRouter } from "next/router";
 import { NotificationInstance } from "antd/es/notification/interface";
 import { humanFileSize } from "@/components/humanbytes";
 
-const PIPED = "https://pipedapi.kavin.rocks/"
+// Known cdn hosts: https://pipedapi.tokhmi.xyz, https://pipedapi.aeong.one
+const PIPED = "https://pipedapi.kavin.rocks"
 
 const videoDisallowedITags: Array<number> = []
 const audioDisallowedITags: Array<number> = []
@@ -99,24 +100,6 @@ const containers: Array<Container> = [
 
 const defaultContainer = containers[1]
 
-const weightedPercentage = (a: { weight: number, value: number }, b: { weight: number, value: number }) => {
-  // Ensure the input percentages are between 0 and 100
-  a.value = Math.min(Math.max(a.value, 0), 100);
-  b.value = Math.min(Math.max(b.value, 0), 100);
-
-  // Normalize the weights
-  const totalWeight = a.weight + b.weight;
-  const normalizedWeight1 = a.weight / totalWeight;
-  const normalizedWeight2 = b.weight / totalWeight;
-
-  // Calculate the weighted average
-  const weightedPercentage1 = a.value * normalizedWeight1;
-  const weightedPercentage2 = b.value * normalizedWeight2;
-  const averagePercentage = weightedPercentage1 + weightedPercentage2;
-
-  return averagePercentage;
-}
-
 const blobToArrayBuffer = (blob: Blob): Promise<Uint8Array> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -174,16 +157,16 @@ const createVideo = async (
   // Init
   const ac = new AbortController()
   const conversionId = (new Date()).getTime()
-  let aborted = false
 
   // Log start
   console.log("Starting conversion: #", conversionId)
 
   // End function
-  const end = () => {
+  const end = (abort = false) => {
     // Log end
     console.log("Ended process #", conversionId)
 
+    if (abort) return
     // Notification: Download complete
     modules.notifications.open({
       message: 'Download complete.',
@@ -227,6 +210,11 @@ const createVideo = async (
   }
   if (audioStream) {
     modules.ffmpeg.FS('writeFile', `input_audio_${conversionId}`, audioStream)
+  }
+
+  if (videoOptions.videoStream && !videoStream || videoOptions.audioStream && !audioStream) {
+    end(true)
+    throw new Error("Aborted")
   }
 
   modules.notifications.open({
@@ -373,12 +361,9 @@ const Home: NextPage = (props: any) => {
   const [dlProgress, setDlProgress] = useState<Array<{ progress: number, total: number, dlStart: number }>>([])
 
   // add together dl progress values and totals and get percentage
-  const dlProgressPercentage = dlProgress.length > 0 ? dlProgress.reduce((acc, obj) => acc + obj.total, 0) - dlProgress.reduce((acc, obj) => acc + obj.progress, 0) : 0
-  const ready = video && bg
+  const dlProgressPercentage = dlProgress.length > 0 ? (dlProgress.reduce((acc, obj) => acc + obj.progress, 0) / dlProgress.reduce((acc, obj) => acc + obj.total, 0)) * 100 : 0
 
-  useEffect(() => {
-    console.log(dlProgress, dlProgressPercentage)
-  }, [dlProgress])
+  const ready = video && bg
 
   // Initialize ffmpeg
   useEffect(() => {
@@ -409,6 +394,7 @@ const Home: NextPage = (props: any) => {
         icon: <IconDeviceMobileOff />
       })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load ffmpeg
@@ -422,6 +408,7 @@ const Home: NextPage = (props: any) => {
     if (id != props.videoID) { setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer(defaultContainer) }
     if (!query || !id) { return }
     setVideoID(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
   // Get video data from API
@@ -443,6 +430,7 @@ const Home: NextPage = (props: any) => {
         icon: <IconX />
       })
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoID])
 
   // Get video thumbnail
@@ -714,12 +702,10 @@ const DownloadOptionsModal = (
     Promise.all(video.videoStreams.filter((stream: any) =>
       stream.mimeType.startsWith("video") && stream.quality.search("p") > -1 && !videoDisallowedITags.includes(stream.itag) && stream.mimeType.split("/")[1] !== "3gpp"
     ).map(async (stream: any) => {
-      const headers = new AxiosHeaders()
-      headers.set('accept-Encoding', 'identity')
       return {
         label: `${stream.quality} (${stream.mimeType})`,
         value: stream.url,
-        size: parseInt((await axios.head(stream.url, { headers })).headers['content-length'])
+        size: parseInt((await axios.head(stream.url)).headers['content-length'])
       }
     })).then((res) => { // Sort video streams
       setVideoStreams([{
@@ -783,13 +769,10 @@ const DownloadOptionsModal = (
     setMetadataDate(mm.date)
   }, [video, bg])
 
-  // Check if stream sizes are ready
-  const streamSizesReady = videoStream !== "off" ? videoStreamSizeBytes !== undefined : true && audioStream !== "off" ? audioStreamSizeBytes !== undefined : true
-
   // Retrive containers
   //   if only video, then video containers, if only audio, then audio containers, if both, then video containers, if none, then none
   //   ignore videostreams and audiostreams, just use the container
-  const availableContainers = !video ? [] : containers.filter((c) => {
+  const availableContainers = useMemo(() => !video ? [] : containers.filter((c) => {
     if (audioStream === "off" && videoStream === "off") {
       return false
     } else if (audioStream !== "off" && videoStream !== "off") {
@@ -805,12 +788,12 @@ const DownloadOptionsModal = (
       }
     }
     return false
-  })
+  }), [audioStream, videoStream, video])
 
   // Set default container
   useEffect(() => {
     if (!containerIsString && !availableContainers.map((c) => c.value).includes(container?.value)) { setContainer(availableContainers[0]) }
-  }, [availableContainers])
+  }, [availableContainers, container?.value, containerIsString, setContainer])
 
   // Handle album art upload
   const handleAlbumArtUpload = (e: any) => {
@@ -1135,14 +1118,15 @@ const DownloadOptionsModal = (
                 </div>
               </motion.div>)}
             </AnimatePresence>
-            <div key="dlEst" style={{
-              display: 'flex',
-              justifyContent: 'right',
-            }}>
-              <Typography.Text>
-                Estimated download time: {(streamSizesReady) ? Math.round(estimatedDownloadTimeSeconds) : '??'} seconds
-              </Typography.Text>
-            </div>
+            {(audioStream !== 'off' && !Number.isNaN(audioStreamSizeBytes)) && (videoStream !== 'off' && !Number.isNaN(videoStreamSizeBytes)) &&
+              <div key="dlEst" style={{
+                display: 'flex',
+                justifyContent: 'right',
+              }}>
+                <Typography.Text>
+                  Estimated download time: {Math.round(estimatedDownloadTimeSeconds)} seconds
+                </Typography.Text>
+              </div>}
           </AnimatePresence>
         </div>
       </div>
