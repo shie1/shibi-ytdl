@@ -9,13 +9,13 @@ import { createFFmpeg } from '@ffmpeg/ffmpeg';
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import { IconCheck, IconDeviceMobileOff, IconExternalLink, IconMovie, IconSearch, IconSearchOff, IconTrashX, IconUpload, IconX } from "@tabler/icons-react"
 import Head from "next/head"
-import axios, { AxiosHeaders, AxiosResponse } from "axios";
+import axios, { AxiosResponse } from "axios";
 import { useRouter } from "next/router";
 import { NotificationInstance } from "antd/es/notification/interface";
 import { humanFileSize } from "@/components/humanbytes";
 
 // Known cdn hosts: https://pipedapi.tokhmi.xyz, https://pipedapi.aeong.one
-const PIPED = "https://pipedapi.kavin.rocks"
+const PIPED = ["https://pipedapi.tokhmi.xyz", "https://pipedapi.kavin.rocks"]
 
 const videoDisallowedITags: Array<number> = []
 const audioDisallowedITags: Array<number> = []
@@ -343,6 +343,13 @@ const Home: NextPage = (props: any) => {
   const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
 
+  // API
+  const [pipedIndex, setPipedIndex] = useState<number>(0)
+  const nextPiped = useCallback(() => {
+    console.error(`${PIPED[pipedIndex]} failed, trying ${PIPED[(pipedIndex + 1) % PIPED.length]}.`)
+    setPipedIndex(old => (old + 1) % PIPED.length)
+  }, [pipedIndex])
+
   // Download options
   const [container, setContainer] = useState<Container>(defaultContainer)
   const [videoStream, setVideoStream] = useState<string | undefined>()
@@ -405,7 +412,7 @@ const Home: NextPage = (props: any) => {
   // Get video ID from query
   useEffect(() => {
     const id = getVideoIDFromURL(query)
-    if (id != props.videoID) { setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer(defaultContainer) }
+    if (id != props.videoID) { setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer(defaultContainer); setPipedIndex(0) }
     if (!query || !id) { return }
     setVideoID(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -417,29 +424,26 @@ const Home: NextPage = (props: any) => {
     if (!videoID) { router.push(`/`); return }
     if (videoID == video?.thumbnailUrl.split("/")[4]) { return }
     router.push(`/?v=${videoID}`)
-    apiCall("GET", `${PIPED.replace(/\/$/, '')}/streams/${videoID}`).then((res) => {
-      setVideo(res)
-    }).catch(() => {
-      notifications.error({
-        message: 'Error occurred.',
-        description: 'An error occurred while trying to get video data.',
-        placement: 'bottomRight',
-        key: 'data-download-error',
-        className: 'noclose',
-        duration: 0,
-        icon: <IconX />
+    try {
+      apiCall("GET", `${PIPED[pipedIndex].replace(/\/$/, '')}/streams/${videoID}`).then((res) => {
+        setVideo(res)
+      }).catch(() => {
+        nextPiped()
       })
-    })
+    } catch { }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoID])
+  }, [videoID, pipedIndex])
 
   // Get video thumbnail
   useEffect(() => {
     if (!video) return
     fetch(video.thumbnailUrl).then(async (res: any) => {
       setBg(await res.blob())
+    }).catch(() => {
+      setVideo(undefined)
+      nextPiped()
     })
-  }, [video])
+  }, [video, nextPiped])
 
   //cut off metadesc at 167 characters and add ... to the end
   const metaDescription = (
