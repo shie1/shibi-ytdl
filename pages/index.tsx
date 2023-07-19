@@ -13,9 +13,7 @@ import axios, { AxiosResponse } from "axios";
 import { useRouter } from "next/router";
 import { NotificationInstance } from "antd/es/notification/interface";
 import { humanFileSize } from "@/components/humanbytes";
-
-// Known cdn hosts: https://pipedapi.tokhmi.xyz, https://pipedapi.aeong.one
-const PIPED = ["https://pipedapi.tokhmi.xyz", "https://pipedapi.kavin.rocks"]
+import { OfficialPipedInstance, PipedInstance, PipedStream, defaultPipedInstaces, sortInstances } from "@/components/piped";
 
 const videoDisallowedITags: Array<number> = []
 const audioDisallowedITags: Array<number> = []
@@ -112,14 +110,14 @@ const blobToArrayBuffer = (blob: Blob): Promise<Uint8Array> => {
   });
 };
 
-const fetchWithProgress = async (url: string, params?: { timeout?: number, progressCallback?: (loaded: number, total: number, dlStart: number) => void, abortController?: AbortController }): Promise<Uint8Array | undefined> => {
+const fetchWithProgress = async (url: string, params?: { timeout?: number, total?: number, progressCallback?: (loaded: number, total: number, dlStart: number) => void, abortController?: AbortController }): Promise<Uint8Array | undefined> => {
   try {
     const dlStart = (new Date()).getTime()
     const response: AxiosResponse = await axios.get(url, {
       responseType: "blob",
       signal: params?.abortController?.signal,
       onDownloadProgress: (progressEvent) => {
-        if (params?.progressCallback) params.progressCallback(progressEvent.loaded, progressEvent.total!, dlStart);
+        if (params?.progressCallback) params.progressCallback(progressEvent.loaded, params?.total || progressEvent.total!, dlStart);
       },
     });
 
@@ -134,8 +132,8 @@ const fetchWithProgress = async (url: string, params?: { timeout?: number, progr
 
 const createVideo = async (
   videoOptions: {
-    videoStream?: string,
-    audioStream?: string,
+    videoStream?: PipedStream | undefined,
+    audioStream?: PipedStream | undefined,
     container: string,
     metadata?: {
       title: string,
@@ -159,12 +157,13 @@ const createVideo = async (
   const conversionId = (new Date()).getTime()
 
   // Log start
-  console.log("Starting conversion: #", conversionId)
+  console.group("Starting conversion: #", conversionId)
 
   // End function
   const end = (abort = false) => {
     // Log end
     console.log("Ended process #", conversionId)
+    console.groupEnd()
 
     if (abort) return
     // Notification: Download complete
@@ -199,8 +198,16 @@ const createVideo = async (
     if (!videoOptions.videoStream && !videoOptions.audioStream) return Promise.resolve([undefined, undefined])
     // paralell downloads
     return Promise.all([
-      videoOptions.videoStream ? fetchWithProgress(videoOptions.videoStream!, { abortController: ac, progressCallback: callbacks?.onProgress }) : undefined,
-      videoOptions.audioStream ? fetchWithProgress(videoOptions.audioStream!, { abortController: ac, progressCallback: callbacks?.onProgress }) : undefined
+      videoOptions.videoStream ? fetchWithProgress(videoOptions.videoStream.url!, {
+        total: videoOptions.videoStream.sizeInBytes,
+        abortController: ac,
+        progressCallback: callbacks?.onProgress
+      }) : undefined,
+      videoOptions.audioStream ? fetchWithProgress(videoOptions.audioStream.url!, {
+        total: videoOptions.audioStream.sizeInBytes,
+        abortController: ac,
+        progressCallback: callbacks?.onProgress
+      }) : undefined
     ])
   })()
 
@@ -236,7 +243,7 @@ const createVideo = async (
       throw new Error("Aborted")
     case "01": // Audio only
       // construct the command with variables: ffmpeg -i input_audio.mp3 -c copy output_audio.mp3
-      command = `-i input_audio_${conversionId} -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
+      command = `-i input_audio_${conversionId} -preset ultrafast -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
 
       // Run ffmpeg
       await modules.ffmpeg.run(...command.split(" "))
@@ -251,7 +258,7 @@ const createVideo = async (
       modules.ffmpeg.FS('writeFile', `input_cover_${conversionId}`, videoOptions.metadata.albumArt)
 
       // construct the command with variables: ffmpeg -i input_audio.mp3 -i input_image.jpg -map 0 -map 1 -c copy -metadata title="Song Title" -metadata artist="Artist Name" -metadata album="Album Name" -metadata year="2023" -metadata date="2023-07-13" -id3v2_version 3 -write_id3v1 1 output_audio.mp3
-      command = `-i input_audio_${conversionId} -i input_cover_${conversionId} -map 0 -map 1 -metadata:s:a:0 Title="${ffmpegNormalize(videoOptions.metadata?.title)}" -metadata:s:a:0 Artist="${ffmpegNormalize(videoOptions.metadata?.artist)}" -metadata:s:a:0 Album="${ffmpegNormalize(videoOptions.metadata?.album)}" -metadata:s:a:0 Year="${videoOptions.metadata?.date}" -f ${videoOptions.container} -id3v2_version 3 -write_id3v1 1 output_${conversionId}.${videoOptions.container}`
+      command = `-i input_audio_${conversionId} -i input_cover_${conversionId} -preset ultrafast -map 0 -map 1 -metadata:s:a:0 Title="${ffmpegNormalize(videoOptions.metadata?.title)}" -metadata:s:a:0 Artist="${ffmpegNormalize(videoOptions.metadata?.artist)}" -metadata:s:a:0 Album="${ffmpegNormalize(videoOptions.metadata?.album)}" -metadata:s:a:0 Year="${videoOptions.metadata?.date}" -f ${videoOptions.container} -id3v2_version 3 -write_id3v1 1 output_${conversionId}.${videoOptions.container}`
 
       // Run ffmpeg
       await modules.ffmpeg.run(...command.split(" "))
@@ -261,7 +268,7 @@ const createVideo = async (
       return modules.ffmpeg.FS('readFile', `output_${conversionId}.${videoOptions.container}`)
     case "10": // Video only
       // construct the command with variables: ffmpeg -i input_video.mp4 -c copy output_video.mp4
-      command = `-i input_video_${conversionId} -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
+      command = `-i input_video_${conversionId} -preset ultrafast -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
       // Run ffmpeg
       await modules.ffmpeg.run(...command.split(" "))
 
@@ -270,7 +277,7 @@ const createVideo = async (
       return modules.ffmpeg.FS('readFile', `output_${conversionId}.${videoOptions.container}`)
     case "11": // Video and audio
       // construct the command with variables: ffmpeg -i input_video.mp4 -i input_audio.mp3 -c copy -map 0:v:0 -map 1:a:0 -shortest output_video.mp4
-      command = `-i input_video_${conversionId} -i input_audio_${conversionId} -c copy -map 0:v:0 -map 1:a:0 -shortest -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
+      command = `-i input_video_${conversionId} -i input_audio_${conversionId} -preset ultrafast -c copy -map 0:v:0 -map 1:a:0 -shortest -f ${videoOptions.container} output_${conversionId}.${videoOptions.container}`
       // Run ffmpeg
       await modules.ffmpeg.run(...command.split(" "))
 
@@ -336,29 +343,23 @@ const VideoDetails = memo(({ video, bg, videoID }: { video: any, bg: Blob, video
   </motion.div>
 </>))
 
-const Home: NextPage = (props: any) => {
+const Home: NextPage = () => {
   // Initializers
   const router = useRouter()
   const [notifications, contextHolder] = notification.useNotification();
   const [ffmpeg, setFFmpeg] = useState<FFmpeg | undefined>(undefined)
   const [ffmpegReady, setFFmpegReady] = useState<boolean>(false)
-
-  // API
-  const [pipedIndex, setPipedIndex] = useState<number>(0)
-  const nextPiped = useCallback(() => {
-    console.error(`${PIPED[pipedIndex]} failed, trying ${PIPED[(pipedIndex + 1) % PIPED.length]}.`)
-    setPipedIndex(old => (old + 1) % PIPED.length)
-  }, [pipedIndex])
+  const [PIPED, setPIPED] = useState<Array<PipedInstance>>([])
 
   // Download options
   const [container, setContainer] = useState<Container>(defaultContainer)
-  const [videoStream, setVideoStream] = useState<string | undefined>()
-  const [audioStream, setAudioStream] = useState<string | undefined>()
+  const [videoStream, setVideoStream] = useState<PipedStream | undefined>()
+  const [audioStream, setAudioStream] = useState<PipedStream | undefined>()
 
   // Video Data
-  const [query, setQuery] = useState<string>(router.query["v"] ? "https://youtu.be/" + router.query["v"] as string : "")
-  const [videoID, setVideoID] = useState<string | undefined>(props.videoID)
-  const [video, setVideo] = useState<any>(props.videoDataPreload)
+  const [query, setQuery] = useState<string>("")
+  const [videoID, setVideoID] = useState<string | undefined>()
+  const [video, setVideo] = useState<any>()
 
   // UI
   const [bg, setBg] = useState<Blob | undefined>(undefined)
@@ -367,8 +368,31 @@ const Home: NextPage = (props: any) => {
   const [inProgress, setInProgress] = useState<boolean>(false)
   const [dlProgress, setDlProgress] = useState<Array<{ progress: number, total: number, dlStart: number }>>([])
 
+  const [pipedReady, setPipedReady] = useState(false)
+
   // add together dl progress values and totals and get percentage
   const dlProgressPercentage = dlProgress.length > 0 ? (dlProgress.reduce((acc, obj) => acc + obj.progress, 0) / dlProgress.reduce((acc, obj) => acc + obj.total, 0)) * 100 : 0
+
+  // API
+  useEffect(() => {
+    if (PIPED.length !== 0) { return }
+    setPIPED(defaultPipedInstaces)
+  }, [PIPED.length])
+
+  useEffect(() => {
+    let pipedInterval: any
+    if (!pipedReady) {
+      pipedInterval = setInterval(() => {
+        if (PIPED.filter((p) => p.initialized).length === PIPED.length) {
+          setPipedReady(true)
+          clearInterval(pipedInterval)
+        }
+      }, 100)
+    }
+    return () => {
+      clearInterval(pipedInterval)
+    }
+  }, [PIPED, pipedReady])
 
   const ready = video && bg
 
@@ -412,7 +436,7 @@ const Home: NextPage = (props: any) => {
   // Get video ID from query
   useEffect(() => {
     const id = getVideoIDFromURL(query)
-    if (id != props.videoID) { setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer(defaultContainer); setPipedIndex(0) }
+    setVideoID(undefined); setVideo(undefined); setBg(undefined); setVideoStream(undefined); setAudioStream(undefined); setContainer(defaultContainer)
     if (!query || !id) { return }
     setVideoID(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -421,18 +445,15 @@ const Home: NextPage = (props: any) => {
   // Get video data from API
   useEffect(() => {
     notifications.destroy("data-download-error")
-    if (!videoID) { router.push(`/`); return }
-    if (videoID == video?.thumbnailUrl.split("/")[4]) { return }
-    router.push(`/?v=${videoID}`)
+    if (!videoID) return
     try {
-      apiCall("GET", `${PIPED[pipedIndex].replace(/\/$/, '')}/streams/${videoID}`).then((res) => {
+      if (PIPED.filter((p) => p.initialized).length !== PIPED.length) return // wait for piped to initialize
+      sortInstances(PIPED)[0].getStreams(videoID, PIPED).then((res) => {
         setVideo(res)
-      }).catch(() => {
-        nextPiped()
       })
     } catch { }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoID, pipedIndex])
+  }, [videoID, PIPED])
 
   // Get video thumbnail
   useEffect(() => {
@@ -441,18 +462,13 @@ const Home: NextPage = (props: any) => {
       setBg(await res.blob())
     }).catch(() => {
       setVideo(undefined)
-      nextPiped()
     })
-  }, [video, nextPiped])
+  }, [video])
 
   //cut off metadesc at 167 characters and add ... to the end
-  const metaDescription = (
-    (props.videoDataPreload
-      ? `Download ${props.videoDataPreload.title} YouTube video from ${props.videoDataPreload.uploader}: ` + props.videoDataPreload.description.replace(/(<([^>]+)>)/gi, "")
-      : "Unlock the Speed of YouTube Downloads! Experience lightning-fast video downloads like never before with our cutting-edge website. Download your favorite YouTube videos with blazing speed and incredible ease. Say goodbye to buffering and waiting, and say hello to instant gratification. Try it now and discover the fastest way to download YouTube videos!") as string
-  ).substring(0, 167) + "..."
-  const metaTitle = (props.videoDataPreload ? `Download "${props.videoDataPreload.title}" with ` : "") + "Shibi-YTDL"
-  const metaImage = props.videoDataPreload ? props.videoDataPreload.thumbnailUrl : ""
+  const metaDescription = "Unlock the Speed of YouTube Downloads! Experience lightning-fast video downloads like never before with our cutting-edge website. Download your favorite YouTube videos with blazing speed and incredible ease. Say goodbye to buffering and waiting, and say hello to instant gratification. Try it now and discover the fastest way to download YouTube videos!"
+  const metaTitle = "Shibi-YTDL"
+  const metaImage = ""
 
   return <>
     <Head>
@@ -534,31 +550,61 @@ const Home: NextPage = (props: any) => {
           {ready && <VideoDetails videoID={videoID!} bg={bg} video={video} />}
         </AnimatePresence>
         <motion.div animate={{ width: '100%' }} layout>
-          <Input.Search
-            onPaste={(e) => {
-              e.preventDefault()
-              setQuery(e.clipboardData.getData('Text'))
-            }}
-            onClick={() => {
-              //check for clipboard permission
-              navigator.permissions.query({ name: "clipboard-read" as any }).then((result) => {
-                if (result.state == "granted" || result.state == "prompt") {
-                  navigator.clipboard.readText().then((text) => {
-                    const id = getVideoIDFromURL(text)
-                    if (!id) return
-                    setQuery(text)
+          <AnimatePresence>
+            {!pipedReady && <motion.div
+              style={{ overflow: 'hidden' }}
+              initial={{
+                scale: 0
+              }}
+              animate={{
+                scale: 1.2
+              }}
+              exit={{
+                scale: 0
+              }}
+              key={"piped-loading"}
+            >
+              <Spin size="large" />
+            </motion.div>}
+            {pipedReady && <motion.div
+              initial={{
+                scale: 0
+              }}
+              transition={{
+                delay: 0.4
+              }}
+              animate={{
+                scale: 1
+              }}
+              exit={{
+                scale: 0
+              }}
+            ><Input.Search
+                onPaste={(e) => {
+                  e.preventDefault()
+                  setQuery(e.clipboardData.getData('Text'))
+                }}
+                onClick={() => {
+                  //check for clipboard permission
+                  navigator.permissions.query({ name: "clipboard-read" as any }).then((result) => {
+                    if (result.state == "granted" || result.state == "prompt") {
+                      navigator.clipboard.readText().then((text) => {
+                        const id = getVideoIDFromURL(text)
+                        if (!id) return
+                        setQuery(text)
+                      })
+                    }
+                  }).catch((_err) => {
+                    // no clipboard API (Firefox) 
                   })
-                }
-              }).catch((_err) => {
-                // no clipboard API (Firefox) 
-              })
-            }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => { if (ready) setModalOpen(true) }} onChange={(e) => {
-              if (e.nativeEvent.type == "input") {
-                setQuery(e.target.value)
-              } else if (e.nativeEvent.type == "insertFromPaste") {
-                e.preventDefault()
-              }
-            }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" />
+                }} disabled={inProgress} loading={query.length !== 0 && !ready} value={query} onSearch={() => { if (ready) setModalOpen(true) }} onChange={(e) => {
+                  if (e.nativeEvent.type == "input") {
+                    setQuery(e.target.value)
+                  } else if (e.nativeEvent.type == "insertFromPaste") {
+                    e.preventDefault()
+                  }
+                }} placeholder="https://youtu.be/dQw4w9WgXcQ" enterButton="Download" style={{ width: '100%' }} size="large" /></motion.div>}
+          </AnimatePresence>
         </motion.div>
       </div >
       <DownloadOptionsModal notifications={notifications} video={video} bg={bg} ffmpeg={ffmpeg} state={{
@@ -633,8 +679,8 @@ const DownloadOptionsModal = (
     state: {
       open: { modalOpen: boolean, setModalOpen: Dispatch<SetStateAction<boolean>> },
       inProgress: { inProgress: boolean, setInProgress: Dispatch<SetStateAction<boolean>> },
-      videoStream: { videoStream: string | undefined, setVideoStream: Dispatch<SetStateAction<string | undefined>> },
-      audioStream: { audioStream: string | undefined, setAudioStream: Dispatch<SetStateAction<string | undefined>> },
+      videoStream: { videoStream: PipedStream | undefined, setVideoStream: Dispatch<SetStateAction<PipedStream | undefined>> },
+      audioStream: { audioStream: PipedStream | undefined, setAudioStream: Dispatch<SetStateAction<PipedStream | undefined>> },
       container: { container: Container, setContainer: Dispatch<SetStateAction<Container>> },
       dlProgress: { dlProgress: Array<{ progress: number, total: number, dlStart: number }>, setDlProgress: Dispatch<SetStateAction<Array<{ progress: number, total: number, dlStart: number }>>> },
     }
@@ -645,8 +691,8 @@ const DownloadOptionsModal = (
   const [downloadSpeedBytesPerSecond, setDownloadSpeedBytesPerSecond] = useState<number | undefined>(undefined)
 
   // Download options
-  const [videoStreams, setVideoStreams] = useState<Array<{ label: string, value: string, size: number }>>([])
-  const [audioStreams, setAudioStreams] = useState<Array<{ label: string, value: string, size: number }>>([])
+  const [videoStreams, setVideoStreams] = useState<Array<PipedStream>>([])
+  const [audioStreams, setAudioStreams] = useState<Array<PipedStream>>([])
 
   // Song metadata
   const [metadataTitle, setMetadataTitle] = useState<string | undefined>(undefined)
@@ -677,8 +723,8 @@ const DownloadOptionsModal = (
   const ready = video && bg
 
   // Get selected stream sizes
-  const videoStreamSizeBytes = videoStreams && videoStream !== "off" ? videoStreams.find((s) => s.value === (videoStream ? videoStream : videoStreams[1].value))?.size : undefined
-  const audioStreamSizeBytes = audioStreams && audioStream !== "off" ? audioStreams.find((s) => s.value === (audioStream ? audioStream : audioStreams[1].value))?.size : undefined
+  const videoStreamSizeBytes = videoStream?.sizeInBytes
+  const audioStreamSizeBytes = audioStream?.sizeInBytes
 
   // Calculate download time
   const estimatedDownloadTimeSeconds = ((videoStreamSizeBytes || 0) + (audioStreamSizeBytes || 0)) / (downloadSpeedBytesPerSecond || 0)
@@ -705,52 +751,23 @@ const DownloadOptionsModal = (
     // Set video streams
     Promise.all(video.videoStreams.filter((stream: any) =>
       stream.mimeType.startsWith("video") && stream.quality.search("p") > -1 && !videoDisallowedITags.includes(stream.itag) && stream.mimeType.split("/")[1] !== "3gpp"
-    ).map(async (stream: any) => {
-      return {
-        label: `${stream.quality} (${stream.mimeType})`,
-        value: stream.url,
-        size: parseInt((await axios.head(stream.url)).headers['content-length'])
-      }
-    })).then((res) => { // Sort video streams
-      setVideoStreams([{
-        label: "No video",
-        value: "off",
-        size: 0
-      }, ...res.sort((a: any, b: any) => {
-        // 1080p60 > 1080p > 720p60 > 720p > 480p > 360p > 240p > 144p
-        const aq = a.label.split(' ')[0]
-        const bq = b.label.split(' ')[0]
-        const aq2 = aq.split('p')[0]
-        const bq2 = bq.split('p')[0]
-        const aq3 = aq.split('p')[1]
-        const bq3 = bq.split('p')[1]
-        if (aq2 === bq2) {
-          return parseInt(bq3) - parseInt(aq3)
-        }
-        return parseInt(bq2) - parseInt(aq2)
-      })])
-    }).catch(() => { })
+    )).then(setVideoStreams)
+      .catch(() => { })
 
     // Set audio streams
     Promise.all(video.audioStreams.filter((stream: any) =>
       stream.mimeType.startsWith("audio") && !audioDisallowedITags.includes(stream.itag) && stream.mimeType.split("/")[1] !== "webm"
-    ).map(async (stream: any) => {
-      return {
-        label: !stream.quality.startsWith("0") ? `${stream.quality} (${stream.mimeType})` : `default (${stream.mimeType})`,
-        value: stream.url,
-        size: parseInt((await axios.head(stream.url)).headers['content-length'])
-      }
-    })).then((res) => { // Sort audio streams
-      setAudioStreams([{
-        label: "No audio",
-        value: "off",
-      }, ...res.sort((a: any, b: any) => {
-        const aq = a.label.split(' ')[0]
-        const bq = b.label.split(' ')[0]
-        return parseInt(bq) - parseInt(aq)
-      })])
-    }).catch(() => { })
+    )).then(setAudioStreams)
+      .catch(() => { })
   }, [video])
+
+  useEffect(() => {
+    setVideoStream(videoStreams[0])
+  }, [videoStreams, setVideoStream])
+
+  useEffect(() => {
+    setAudioStream(audioStreams[0])
+  }, [audioStreams, setAudioStream])
 
   // Retrive metadata
   useEffect(() => {
@@ -777,17 +794,17 @@ const DownloadOptionsModal = (
   //   if only video, then video containers, if only audio, then audio containers, if both, then video containers, if none, then none
   //   ignore videostreams and audiostreams, just use the container
   const availableContainers = useMemo(() => !video ? [] : containers.filter((c) => {
-    if (audioStream === "off" && videoStream === "off") {
+    if (!audioStream && !videoStream) {
       return false
-    } else if (audioStream !== "off" && videoStream !== "off") {
+    } else if (audioStream && videoStream) {
       if (c.type === "video") {
         return true
       }
     } else {
-      if ((c.type === "video" || c.type === "videoonly") && videoStream !== "off") {
+      if ((c.type === "video" || c.type === "videoonly") && videoStream) {
         return true
       }
-      if (c.type === "audio" && audioStream !== "off") {
+      if (c.type === "audio" && audioStream) {
         return true
       }
     }
@@ -822,15 +839,11 @@ const DownloadOptionsModal = (
       setModalOpen(false)
       setInProgress(true)
 
-      // If no stream selected, use the first one
-      const vStreamUrl = videoStream === "off" ? undefined : videoStream || videoStreams[1].value
-      const aStreamUrl = audioStream === "off" ? undefined : audioStream || audioStreams[1].value
-
       // Start download
       const ffmpegResult = await createVideo({
         container: container.value,
-        videoStream: vStreamUrl,
-        audioStream: aStreamUrl,
+        videoStream: videoStream,
+        audioStream: audioStream,
         // ...(video.category === "Music" ? {
         //   metadata: {
         //     title: metadataTitle!,
@@ -899,11 +912,46 @@ const DownloadOptionsModal = (
         {videoStreams.length > 0 && audioStreams.length > 0 &&
           (<><div style={{ flex: 1, minWidth: 179 }}>
             <Typography.Text style={{ fontSize: '.8rem' }}>Video{!videoStreamSizeBytes ? '' : ` | ${humanFileSize(videoStreamSizeBytes)}`}</Typography.Text>
-            <Select value={videoStream || videoStreams[1].value} options={videoStreams} style={{ width: '100%' }} onChange={setVideoStream} />
+            <Select value={videoStream?.url || "off"} options={[{
+              label: "No video",
+              value: "off",
+            }, ...videoStreams.map((stream => ({
+              label: `${stream.quality} (${stream.mimeType})`,
+              value: stream.url,
+            }))).sort((a: any, b: any) => {
+              // 1080p60 > 1080p > 720p60 > 720p > 480p > 360p > 240p > 144p
+              const aq = a.label.split(' ')[0]
+              const bq = b.label.split(' ')[0]
+              const aq2 = aq.split('p')[0]
+              const bq2 = bq.split('p')[0]
+              const aq3 = aq.split('p')[1]
+              const bq3 = bq.split('p')[1]
+              if (aq2 === bq2) {
+                return parseInt(bq3) - parseInt(aq3)
+              }
+              return parseInt(bq2) - parseInt(aq2)
+            })]} style={{ width: '100%' }} onChange={(e) => {
+              setVideoStream(videoStreams.find((s) => s.url === e)!)
+            }} />
           </div>
             <div style={{ flex: 1, minWidth: 179 }}>
               <Typography.Text style={{ fontSize: '.8rem' }}>Audio{!audioStreamSizeBytes ? '' : ` | ${humanFileSize(audioStreamSizeBytes)}`}</Typography.Text>
-              <Select value={audioStream || audioStreams[1].value} options={audioStreams} style={{ width: '100%' }} onChange={setAudioStream} />
+              <Select value={audioStream?.url || "off"} options={[{
+                label: "No audio",
+                value: "off",
+              }, ...audioStreams.map(stream => ({
+                label: `${stream.quality} (${stream.mimeType})`,
+                value: stream.url,
+              })).sort((a: any, b: any) => {
+                // (desc)kbps
+                const aq = a.label.split(' ')[0]
+                const bq = b.label.split(' ')[0]
+                const aq2 = aq.split('k')[0]
+                const bq2 = bq.split('k')[0]
+                return parseInt(bq2) - parseInt(aq2)
+              })]} style={{ width: '100%' }} onChange={(e) => {
+                setAudioStream(audioStreams.find((s) => s.url === e)!)
+              }} />
             </div></>)}
         <div style={{ flex: 1, minWidth: 179 }}>
           <Typography.Text style={{ fontSize: '.8rem' }}>Container - <span onClick={() => { setContainerIsString(old => !old) }} style={{ textDecoration: 'underline', cursor: 'pointer', userSelect: 'none' }}>switch to {containerIsString ? "normal" : "custom"}</span></Typography.Text>
@@ -938,7 +986,7 @@ const DownloadOptionsModal = (
               }}
             ><Input value={container?.value} style={{ width: '100%' }} onChange={(e) => setContainer({ value: e.currentTarget.value, type: undefined })} defaultValue={availableContainers[0].value} /></motion.div>)}
             <AnimatePresence key="AudioMetadataEditor">
-              {false && (videoStream === "off" && audioStream !== "off" && video?.category === "Music") && (<motion.div
+              {false && (!videoStream && audioStream && video?.category === "Music") && (<motion.div
                 style={{
                   overflow: 'hidden',
                   marginBottom: '.5rem',
@@ -1122,7 +1170,7 @@ const DownloadOptionsModal = (
                 </div>
               </motion.div>)}
             </AnimatePresence>
-            {(audioStream !== 'off' && !Number.isNaN(audioStreamSizeBytes)) && (videoStream !== 'off' && !Number.isNaN(videoStreamSizeBytes)) &&
+            {estimatedDownloadTimeSeconds > 0 &&
               <div key="dlEst" style={{
                 display: 'flex',
                 justifyContent: 'right',
@@ -1143,25 +1191,8 @@ export async function getServerSideProps(context: any) {
   context.res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   context.res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
 
-  let videoID: string = ""
-  if (context.query["v"]) {
-    videoID = context.query["v"]
-  }
-
-  try {
-    return {
-      props: {
-        videoID,
-        videoDataPreload: videoID ? await apiCall("GET", `${PIPED}/streams/${videoID}`) : null,
-      },
-    };
-  } catch (err) {
-    return {
-      props: {
-        videoID,
-        videoDataPreload: null,
-      },
-    };
+  return {
+    props: {}
   }
 }
 
