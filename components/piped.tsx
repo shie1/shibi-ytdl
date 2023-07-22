@@ -4,7 +4,7 @@ export type PipedStream = {
     url: string
     codec: string
     quality: string
-    itag: number
+    itag?: number
     mimeType: string
     sizeInBytes?: number
 }
@@ -21,8 +21,15 @@ export type PipedDetails = {
     audioStreams: PipedStream[]
 }
 
+const streamsEqual = (a: PipedStream, b: PipedStream): boolean => {
+    if (a.itag && b.itag) return a.itag === b.itag
+    return a.codec === b.codec && a.quality === b.quality && a.mimeType === b.mimeType
+}
+
 export const sortInstances = (instances: PipedInstance[]): PipedInstance[] => {
     return instances.filter(instance => instance.online && instance.initialized).sort((a, b) => {
+        if (a.priority > b.priority) return -1
+        if (a.priority < b.priority) return 1
         if (a.ping < b.ping) return -1
         if (a.ping > b.ping) return 1
         return 0
@@ -41,9 +48,11 @@ export class PipedInstance {
     public cdn: boolean = false
     public online: boolean = true
     public ping: number = 0
-    constructor(host: string) {
+    public readonly priority: number = 0
+    constructor(host: string, props?: { priority?: number }) {
         this.host = host
         this.domain = (new URL(host)).hostname
+        this.priority = props?.priority || 0
         this.initialize();
     }
 
@@ -68,17 +77,25 @@ export class PipedInstance {
     public async getStreams(videoID: string, instances: Array<PipedInstance>): Promise<PipedDetails> {
         try {
             if (!this.online) throw new Error("Offline")
-            const backupCDNHost = getFastestCDN(sortInstances(instances))?.host || undefined
-            console.log(`Requesting ${this.domain} for streams of ${videoID} (CDN: ${backupCDNHost})`, sortInstances(instances))
+            const backupCDN = getFastestCDN(sortInstances(instances)) || undefined
+            console.log(`Requesting ${this.domain} for streams of ${videoID} (CDN: ${backupCDN?.host})`, sortInstances(instances))
 
             const response = await axios.get(`${this.host}/streams/${videoID}`)
-            const responseCDN = await axios.get(`${backupCDNHost}/streams/${videoID}`)
+            const responseCDN = await axios.get(`${backupCDN?.host}/streams/${videoID}`)
 
             // async map
             const audioStreams: PipedStream[] = await Promise.all(response.data.audioStreams.filter((stream: any) =>
                 stream.mimeType.startsWith("audio") && stream.mimeType.split("/")[1] !== "webm"
             ).map(async (stream: any) => {
-                const sizeInBytes = parseInt(await (await axios.head(responseCDN.data.audioStreams.find((s: any) => s.itag === stream.itag).url)).headers["content-length"])
+                let sizeInBytes = 0
+                try {
+                    const cdnReq = await axios.head(responseCDN.data.audioStreams.find((s: any) => streamsEqual(stream, s)).url)
+                    sizeInBytes = parseInt(cdnReq.headers["content-length"])
+                } catch (e) {
+                    console.log(e)
+                    backupCDN!.online = false
+                    throw new Error("CDN Offline")
+                }
                 return {
                     url: stream.url,
                     codec: stream.codec,
@@ -91,7 +108,14 @@ export class PipedInstance {
             const videoStreams: PipedStream[] = await Promise.all(response.data.videoStreams.filter(((stream: any) =>
                 stream.mimeType.startsWith("video") && stream.quality.search("p") > -1 && stream.mimeType.split("/")[1] !== "3gpp"
             )).map(async (stream: any) => {
-                const sizeInBytes = parseInt(await (await axios.head(responseCDN.data.videoStreams.find((s: any) => s.itag === stream.itag).url)).headers["content-length"])
+                let sizeInBytes = 0
+                try {
+                    const cdnReq = await axios.head(responseCDN.data.videoStreams.find((s: any) => streamsEqual(stream, s)).url)
+                    sizeInBytes = parseInt(cdnReq.headers["content-length"])
+                } catch (e) {
+                    backupCDN!.online = false
+                    throw new Error("CDN Offline")
+                }
                 return {
                     url: stream.url,
                     codec: stream.codec,
@@ -117,7 +141,8 @@ export class PipedInstance {
             console.log("Loaded streams: ", res)
 
             return res
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.message === "CDN Offline") { throw new Error("CDN Offline") }
             console.error(error)
             if (this.online) this.online = false
             throw new Error("Offline")
@@ -126,7 +151,6 @@ export class PipedInstance {
 }
 
 export const defaultPipedInstaces: PipedInstance[] = ([
-    "https://pipedapi.kavin.rocks",
     "https://pipedapi.tokhmi.xyz",
     "https://pipedapi.moomoo.me",
     "https://pipedapi.syncpundit.io",
@@ -163,3 +187,4 @@ export const defaultPipedInstaces: PipedInstance[] = ([
 ].map(host => new PipedInstance(host)))
 
 export const OfficialPipedInstance = new PipedInstance("https://pipedapi.kavin.rocks")
+defaultPipedInstaces.push(OfficialPipedInstance)
